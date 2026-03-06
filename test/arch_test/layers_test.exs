@@ -402,6 +402,7 @@ defmodule ArchTest.LayersTest do
 
   defp check_onion_rules(%Layers{} = arch, graph) do
     layer_names = Keyword.keys(arch.layers)
+
     arch.layers
     |> Enum.with_index()
     |> Enum.flat_map(fn {{layer_name, pattern}, idx} ->

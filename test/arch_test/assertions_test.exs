@@ -209,11 +209,12 @@ defmodule ArchTest.AssertionsTest do
 
   describe "should_implement_behaviour/2" do
     test "passes when modules implement the behaviour" do
-      # Inspect.Atom declares @behaviour Inspect
-      graph = %{Inspect.Atom => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Inspect.Atom end)
+      mod = FixtureApp.Behaviours.Implementing
+      beh = FixtureApp.Behaviours.MyBehaviour
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
-      assert ArchTest.Assertions.should_implement_behaviour(ms, Inspect, graph: graph) == :ok
+      assert ArchTest.Assertions.should_implement_behaviour(ms, beh, graph: graph) == :ok
     end
 
     test "fails when module does not implement the behaviour" do
@@ -242,12 +243,13 @@ defmodule ArchTest.AssertionsTest do
     end
 
     test "fails when module implements the forbidden behaviour" do
-      # Inspect.Atom declares @behaviour Inspect
-      graph = %{Inspect.Atom => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Inspect.Atom end)
+      mod = FixtureApp.Behaviours.Implementing
+      beh = FixtureApp.Behaviours.MyBehaviour
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert_raise ExUnit.AssertionError, ~r/should_not_implement_behaviour/, fn ->
-        ArchTest.Assertions.should_not_implement_behaviour(ms, Inspect, graph: graph)
+        ArchTest.Assertions.should_not_implement_behaviour(ms, beh, graph: graph)
       end
     end
   end
@@ -350,9 +352,10 @@ defmodule ArchTest.AssertionsTest do
 
   describe "should_have_attribute/2" do
     test "passes when module has the attribute" do
-      # Enumerable is a protocol and has :behaviour attribute
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      # Implementing declares @behaviour MyBehaviour, so :behaviour attribute exists
+      mod = FixtureApp.Behaviours.Implementing
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
       assert ArchTest.Assertions.should_have_attribute(ms, :behaviour, graph: graph) == :ok
     end
 
@@ -410,9 +413,11 @@ defmodule ArchTest.AssertionsTest do
       end
     end
 
-    test "fails when protocol module has :behaviour" do
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+    test "fails when module has the :behaviour attribute" do
+      # FixtureApp.Behaviours.Implementing declares @behaviour MyBehaviour
+      mod = FixtureApp.Behaviours.Implementing
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert_raise ExUnit.AssertionError, ~r/should_not_have_attribute/, fn ->
         ArchTest.Assertions.should_not_have_attribute(ms, :behaviour, graph: graph)
@@ -422,19 +427,20 @@ defmodule ArchTest.AssertionsTest do
 
   describe "should_have_attribute_value/3" do
     test "passes when attribute has the expected value" do
-      # Enumerable has behaviour: [Protocol]
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      # Implementing declares @behaviour MyBehaviour
+      mod = FixtureApp.Behaviours.Implementing
+      beh = FixtureApp.Behaviours.MyBehaviour
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
-      assert ArchTest.Assertions.should_have_attribute_value(ms, :behaviour, [Protocol],
-               graph: graph
-             ) == :ok
+      assert ArchTest.Assertions.should_have_attribute_value(ms, :behaviour, [beh], graph: graph) ==
+               :ok
     end
 
     test "fails when attribute has a different value" do
-      # Enumerable has behaviour: [Protocol], not [GenServer]
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      mod = FixtureApp.Behaviours.Implementing
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert_raise ExUnit.AssertionError, ~r/should_have_attribute_value/, fn ->
         ArchTest.Assertions.should_have_attribute_value(ms, :behaviour, [GenServer], graph: graph)
@@ -442,8 +448,9 @@ defmodule ArchTest.AssertionsTest do
     end
 
     test "error message shows actual and expected values" do
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      mod = FixtureApp.Behaviours.Implementing
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert_raise ExUnit.AssertionError, ~r/expected \[GenServer\]/, fn ->
         ArchTest.Assertions.should_have_attribute_value(ms, :behaviour, [GenServer], graph: graph)
@@ -451,7 +458,6 @@ defmodule ArchTest.AssertionsTest do
     end
 
     test "passes for nil when attribute does not exist" do
-      # Keyword.get returns nil for missing keys, which equals nil
       graph = %{ArchTest.Violation => []}
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Violation end)
 
@@ -462,9 +468,9 @@ defmodule ArchTest.AssertionsTest do
 
   describe "should_not_have_attribute_value/3" do
     test "passes when attribute has a different value" do
-      # Enumerable has behaviour: [Protocol], not [GenServer]
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      mod = FixtureApp.Behaviours.Implementing
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert ArchTest.Assertions.should_not_have_attribute_value(ms, :behaviour, [GenServer],
                graph: graph
@@ -472,14 +478,13 @@ defmodule ArchTest.AssertionsTest do
     end
 
     test "fails when attribute has the forbidden value" do
-      # Enumerable has behaviour: [Protocol]
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      mod = FixtureApp.Behaviours.Implementing
+      beh = FixtureApp.Behaviours.MyBehaviour
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert_raise ExUnit.AssertionError, ~r/should_not_have_attribute_value/, fn ->
-        ArchTest.Assertions.should_not_have_attribute_value(ms, :behaviour, [Protocol],
-          graph: graph
-        )
+        ArchTest.Assertions.should_not_have_attribute_value(ms, :behaviour, [beh], graph: graph)
       end
     end
 
@@ -487,7 +492,10 @@ defmodule ArchTest.AssertionsTest do
       graph = %{ArchTest.Violation => []}
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Violation end)
 
-      assert ArchTest.Assertions.should_not_have_attribute_value(ms, :nonexistent, [Protocol],
+      assert ArchTest.Assertions.should_not_have_attribute_value(
+               ms,
+               :nonexistent,
+               [FixtureApp.Behaviours.MyBehaviour],
                graph: graph
              ) == :ok
     end
@@ -495,10 +503,12 @@ defmodule ArchTest.AssertionsTest do
 
   describe "should_use/2" do
     test "passes when module uses the target (appears in attribute values)" do
-      # Enumerable has behaviour: [Protocol], so Protocol appears in flattened values
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
-      assert ArchTest.Assertions.should_use(ms, Protocol, graph: graph) == :ok
+      # Implementing declares @behaviour MyBehaviour, so MyBehaviour appears in attributes
+      mod = FixtureApp.Behaviours.Implementing
+      beh = FixtureApp.Behaviours.MyBehaviour
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
+      assert ArchTest.Assertions.should_use(ms, beh, graph: graph) == :ok
     end
 
     test "fails when module does not use the target" do
@@ -528,21 +538,24 @@ defmodule ArchTest.AssertionsTest do
     end
 
     test "fails when module uses the target" do
-      # Enumerable has Protocol in its attribute values
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      mod = FixtureApp.Behaviours.Implementing
+      beh = FixtureApp.Behaviours.MyBehaviour
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert_raise ExUnit.AssertionError, ~r/should_not_use/, fn ->
-        ArchTest.Assertions.should_not_use(ms, Protocol, graph: graph)
+        ArchTest.Assertions.should_not_use(ms, beh, graph: graph)
       end
     end
 
     test "error message mentions the forbidden module" do
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      mod = FixtureApp.Behaviours.Implementing
+      beh = FixtureApp.Behaviours.MyBehaviour
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
-      assert_raise ExUnit.AssertionError, ~r/Protocol/, fn ->
-        ArchTest.Assertions.should_not_use(ms, Protocol, graph: graph)
+      assert_raise ExUnit.AssertionError, ~r/MyBehaviour/, fn ->
+        ArchTest.Assertions.should_not_use(ms, beh, graph: graph)
       end
     end
   end
@@ -671,16 +684,17 @@ defmodule ArchTest.AssertionsTest do
 
   describe "module attribute assertions with multiple modules" do
     test "should_have_attribute passes when all modules have the attribute" do
-      # Both Enumerable and Collectable have :behaviour
-      graph = %{Enumerable => [], Collectable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod in [Enumerable, Collectable] end)
-      assert ArchTest.Assertions.should_have_attribute(ms, :behaviour, graph: graph) == :ok
+      # Both modules have :vsn (all compiled modules do)
+      graph = %{ArchTest.Pattern => [], ArchTest.Rule => []}
+      ms = ModuleSet.satisfying(fn mod -> mod in [ArchTest.Pattern, ArchTest.Rule] end)
+      assert ArchTest.Assertions.should_have_attribute(ms, :vsn, graph: graph) == :ok
     end
 
     test "should_have_attribute fails when one module lacks the attribute" do
-      # Enumerable has :behaviour, ArchTest.Violation does not
-      graph = %{Enumerable => [], ArchTest.Violation => []}
-      ms = ModuleSet.satisfying(fn mod -> mod in [Enumerable, ArchTest.Violation] end)
+      # Implementing has :behaviour, ArchTest.Violation does not
+      impl = FixtureApp.Behaviours.Implementing
+      graph = %{impl => [], ArchTest.Violation => []}
+      ms = ModuleSet.satisfying(fn mod -> mod in [impl, ArchTest.Violation] end)
 
       assert_raise ExUnit.AssertionError, ~r/should_have_attribute/, fn ->
         ArchTest.Assertions.should_have_attribute(ms, :behaviour, graph: graph)
@@ -1033,11 +1047,13 @@ defmodule ArchTest.AssertionsTest do
 
   describe "message: opt for should_not_implement_behaviour" do
     test "custom message appears in AssertionError" do
-      graph = %{Inspect.Atom => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Inspect.Atom end)
+      mod = FixtureApp.Behaviours.Implementing
+      beh = FixtureApp.Behaviours.MyBehaviour
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
-        ArchTest.Assertions.should_not_implement_behaviour(ms, Inspect,
+        ArchTest.Assertions.should_not_implement_behaviour(ms, beh,
           graph: graph,
           message: "my custom message"
         )
@@ -1103,8 +1119,9 @@ defmodule ArchTest.AssertionsTest do
 
   describe "message: opt for should_have_attribute_value" do
     test "custom message appears in AssertionError" do
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      mod = FixtureApp.Behaviours.Implementing
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_have_attribute_value(ms, :behaviour, [GenServer],
@@ -1117,11 +1134,13 @@ defmodule ArchTest.AssertionsTest do
 
   describe "message: opt for should_not_have_attribute_value" do
     test "custom message appears in AssertionError" do
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      mod = FixtureApp.Behaviours.Implementing
+      beh = FixtureApp.Behaviours.MyBehaviour
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
-        ArchTest.Assertions.should_not_have_attribute_value(ms, :behaviour, [Protocol],
+        ArchTest.Assertions.should_not_have_attribute_value(ms, :behaviour, [beh],
           graph: graph,
           message: "my custom message"
         )
@@ -1142,11 +1161,13 @@ defmodule ArchTest.AssertionsTest do
 
   describe "message: opt for should_not_use" do
     test "custom message appears in AssertionError" do
-      graph = %{Enumerable => []}
-      ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
+      mod = FixtureApp.Behaviours.Implementing
+      beh = FixtureApp.Behaviours.MyBehaviour
+      graph = %{mod => []}
+      ms = ModuleSet.satisfying(fn m -> m == mod end)
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
-        ArchTest.Assertions.should_not_use(ms, Protocol,
+        ArchTest.Assertions.should_not_use(ms, beh,
           graph: graph,
           message: "my custom message"
         )

@@ -41,7 +41,13 @@ defmodule ArchTest.Assertions do
         )
       end
 
-    assert_no_violations(violations, "should_not_depend_on", subject, object, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_not_depend_on",
+      subject,
+      object,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -75,12 +81,20 @@ defmodule ArchTest.Assertions do
           caller,
           callee,
           "dependency is not in the allowed set. " <>
-            format_patterns(subject) <> " may only depend on " <> format_patterns(allowed) <>
+            format_patterns(subject) <>
+            " may only depend on " <>
+            format_patterns(allowed) <>
             ". Add an allow or move the dependency."
         )
       end
 
-    assert_no_violations(violations, "should_only_depend_on", subject, allowed, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_only_depend_on",
+      subject,
+      allowed,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -112,7 +126,13 @@ defmodule ArchTest.Assertions do
         )
       end
 
-    assert_no_violations(violations, "should_not_be_called_by", callers, object, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_not_be_called_by",
+      callers,
+      object,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -156,7 +176,13 @@ defmodule ArchTest.Assertions do
         )
       end
 
-    assert_no_violations(violations, "should_only_be_called_by", allowed_callers, object, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_only_be_called_by",
+      allowed_callers,
+      object,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -169,9 +195,7 @@ defmodule ArchTest.Assertions do
       |> should_not_transitively_depend_on(modules_matching("MyApp.Billing.*"))
   """
   @spec should_not_transitively_depend_on(ModuleSet.t(), ModuleSet.t(), keyword()) :: :ok
-  def should_not_transitively_depend_on(%ModuleSet{} = subject, %ModuleSet{} = object,
-        opts \\ []
-      ) do
+  def should_not_transitively_depend_on(%ModuleSet{} = subject, %ModuleSet{} = object, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
     object_mods = ModuleSet.resolve(object, graph) |> MapSet.new()
@@ -197,7 +221,13 @@ defmodule ArchTest.Assertions do
       end
       |> List.flatten()
 
-    assert_no_violations(violations, "should_not_transitively_depend_on", subject, object, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_not_transitively_depend_on",
+      subject,
+      object,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -218,12 +248,19 @@ defmodule ArchTest.Assertions do
       Enum.map(subject_mods, fn mod ->
         Violation.existence(
           mod,
-          "this module matches the forbidden pattern " <> format_patterns(subject) <>
+          "this module matches the forbidden pattern " <>
+            format_patterns(subject) <>
             " and must be renamed or removed"
         )
       end)
 
-    assert_no_violations(violations, "should_not_exist", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_not_exist",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -251,7 +288,13 @@ defmodule ArchTest.Assertions do
         )
       end
 
-    assert_no_violations(violations, "should_reside_under", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_reside_under",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -279,7 +322,13 @@ defmodule ArchTest.Assertions do
         )
       end
 
-    assert_no_violations(violations, "should_have_name_matching", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_have_name_matching",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -316,7 +365,13 @@ defmodule ArchTest.Assertions do
         )
       end)
 
-    assert_no_violations(violations, "should_be_free_of_cycles", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_be_free_of_cycles",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -339,7 +394,7 @@ defmodule ArchTest.Assertions do
     violations =
       for mod <- subject_mods,
           fns = get_public_functions(mod),
-          not ({fun_name, arity} in fns) do
+          {fun_name, arity} not in fns do
         Violation.naming(
           mod,
           "module does not export #{fun_name}/#{arity}. " <>
@@ -378,7 +433,13 @@ defmodule ArchTest.Assertions do
         )
       end
 
-    assert_no_violations(violations, "should_not_export", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_not_export",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -503,33 +564,34 @@ defmodule ArchTest.Assertions do
     failures =
       count_constraints
       |> Enum.flat_map(fn
-        {:exactly, n}   -> if count == n, do: [], else: ["exactly #{n} (got #{count})"]
-        {:at_least, n}  -> if count >= n, do: [], else: ["at_least #{n} (got #{count})"]
-        {:at_most, n}   -> if count <= n, do: [], else: ["at_most #{n} (got #{count})"]
-        {:less_than, n} -> if count < n,  do: [], else: ["less_than #{n} (got #{count})"]
-        {:more_than, n} -> if count > n,  do: [], else: ["more_than #{n} (got #{count})"]
-        {other, _}      -> ["unknown constraint :#{other}"]
+        {:exactly, n} -> if count == n, do: [], else: ["exactly #{n} (got #{count})"]
+        {:at_least, n} -> if count >= n, do: [], else: ["at_least #{n} (got #{count})"]
+        {:at_most, n} -> if count <= n, do: [], else: ["at_most #{n} (got #{count})"]
+        {:less_than, n} -> if count < n, do: [], else: ["less_than #{n} (got #{count})"]
+        {:more_than, n} -> if count > n, do: [], else: ["more_than #{n} (got #{count})"]
+        {other, _} -> ["unknown constraint :#{other}"]
       end)
 
     if failures == [] do
       :ok
     else
-      user_hint = case Keyword.get(opts, :message) do
-        nil -> ""
-        msg -> "\n  note:    #{msg}"
-      end
+      user_hint =
+        case Keyword.get(opts, :message) do
+          nil -> ""
+          msg -> "\n  note:    #{msg}"
+        end
 
       constraint_str = count_constraints |> Enum.map_join(", ", fn {k, v} -> "#{k}: #{v}" end)
 
       raise ExUnit.AssertionError,
         message:
           "ArchTest — should_have_module_count — constraint violated\n" <>
-          "  rule:    should_have_module_count\n" <>
-          "  subject: #{format_patterns(subject)}\n" <>
-          "  constraints: #{constraint_str}\n" <>
-          "  actual:  #{count} module(s)\n" <>
-          "  failed:  #{Enum.join(failures, ", ")}" <>
-          user_hint
+            "  rule:    should_have_module_count\n" <>
+            "  subject: #{format_patterns(subject)}\n" <>
+            "  constraints: #{constraint_str}\n" <>
+            "  actual:  #{count} module(s)\n" <>
+            "  failed:  #{Enum.join(failures, ", ")}" <>
+            user_hint
     end
   end
 
@@ -592,7 +654,13 @@ defmodule ArchTest.Assertions do
         )
       end
 
-    assert_no_violations(violations, "should_implement_behaviour", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_implement_behaviour",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -622,7 +690,13 @@ defmodule ArchTest.Assertions do
         )
       end
 
-    assert_no_violations(violations, "should_not_implement_behaviour", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_not_implement_behaviour",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -652,7 +726,13 @@ defmodule ArchTest.Assertions do
         )
       end
 
-    assert_no_violations(violations, "should_implement_protocol", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_implement_protocol",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -682,7 +762,13 @@ defmodule ArchTest.Assertions do
         )
       end
 
-    assert_no_violations(violations, "should_not_implement_protocol", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_not_implement_protocol",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -697,7 +783,8 @@ defmodule ArchTest.Assertions do
       |> should_have_attribute(:behaviour)
   """
   @spec should_have_attribute(ModuleSet.t(), atom(), keyword()) :: :ok
-  def should_have_attribute(%ModuleSet{} = subject, attr_key, opts \\ []) when is_atom(attr_key) do
+  def should_have_attribute(%ModuleSet{} = subject, attr_key, opts \\ [])
+      when is_atom(attr_key) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
     warn_if_empty(subject_mods, subject, "should_have_attribute")
@@ -706,11 +793,22 @@ defmodule ArchTest.Assertions do
       for mod <- subject_mods,
           attrs = get_module_attributes(mod),
           not Keyword.has_key?(attrs, attr_key) do
-        present = attrs |> Keyword.keys() |> Enum.uniq() |> Enum.map(&inspect/1) |> Enum.join(", ")
-        Violation.naming(mod, "module does not have attribute :#{attr_key}. Present attributes: [#{present}]")
+        present =
+          attrs |> Keyword.keys() |> Enum.uniq() |> Enum.map(&inspect/1) |> Enum.join(", ")
+
+        Violation.naming(
+          mod,
+          "module does not have attribute :#{attr_key}. Present attributes: [#{present}]"
+        )
       end
 
-    assert_no_violations(violations, "should_have_attribute", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_have_attribute",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -724,7 +822,8 @@ defmodule ArchTest.Assertions do
       |> should_not_have_attribute(:deprecated)
   """
   @spec should_not_have_attribute(ModuleSet.t(), atom(), keyword()) :: :ok
-  def should_not_have_attribute(%ModuleSet{} = subject, attr_key, opts \\ []) when is_atom(attr_key) do
+  def should_not_have_attribute(%ModuleSet{} = subject, attr_key, opts \\ [])
+      when is_atom(attr_key) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
     warn_if_empty(subject_mods, subject, "should_not_have_attribute")
@@ -734,10 +833,20 @@ defmodule ArchTest.Assertions do
           attrs = get_module_attributes(mod),
           Keyword.has_key?(attrs, attr_key) do
         value = Keyword.get(attrs, attr_key)
-        Violation.naming(mod, "module has forbidden attribute :#{attr_key} with value #{inspect(value)}")
+
+        Violation.naming(
+          mod,
+          "module has forbidden attribute :#{attr_key} with value #{inspect(value)}"
+        )
       end
 
-    assert_no_violations(violations, "should_not_have_attribute", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_not_have_attribute",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -763,10 +872,19 @@ defmodule ArchTest.Assertions do
           attrs = get_module_attributes(mod),
           actual = Keyword.get(attrs, attr_key),
           actual != attr_value do
-        Violation.naming(mod, "module attribute :#{attr_key} is #{inspect(actual)}, expected #{inspect(attr_value)}")
+        Violation.naming(
+          mod,
+          "module attribute :#{attr_key} is #{inspect(actual)}, expected #{inspect(attr_value)}"
+        )
       end
 
-    assert_no_violations(violations, "should_have_attribute_value", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_have_attribute_value",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -790,10 +908,19 @@ defmodule ArchTest.Assertions do
           attrs = get_module_attributes(mod),
           actual = Keyword.get(attrs, attr_key),
           actual == attr_value do
-        Violation.naming(mod, "module has forbidden attribute :#{attr_key} with value #{inspect(attr_value)}")
+        Violation.naming(
+          mod,
+          "module has forbidden attribute :#{attr_key} with value #{inspect(attr_value)}"
+        )
       end
 
-    assert_no_violations(violations, "should_not_have_attribute_value", subject, nil, Keyword.get(opts, :message))
+    assert_no_violations(
+      violations,
+      "should_not_have_attribute_value",
+      subject,
+      nil,
+      Keyword.get(opts, :message)
+    )
   end
 
   @doc """
@@ -820,8 +947,11 @@ defmodule ArchTest.Assertions do
     violations =
       for mod <- subject_mods,
           not module_uses?(mod, used_module) do
-        Violation.naming(mod, "module does not appear to use #{inspect(used_module)}. " <>
-          "Add `use #{inspect(used_module)}` or check the module attribute :behaviour.")
+        Violation.naming(
+          mod,
+          "module does not appear to use #{inspect(used_module)}. " <>
+            "Add `use #{inspect(used_module)}` or check the module attribute :behaviour."
+        )
       end
 
     assert_no_violations(violations, "should_use", subject, nil, Keyword.get(opts, :message))
@@ -847,8 +977,11 @@ defmodule ArchTest.Assertions do
     violations =
       for mod <- subject_mods,
           module_uses?(mod, used_module) do
-        Violation.naming(mod, "module appears to use #{inspect(used_module)} but should not. " <>
-          "Remove `use #{inspect(used_module)}` from the module.")
+        Violation.naming(
+          mod,
+          "module appears to use #{inspect(used_module)} but should not. " <>
+            "Remove `use #{inspect(used_module)}` from the module."
+        )
       end
 
     assert_no_violations(violations, "should_not_use", subject, nil, Keyword.get(opts, :message))

@@ -129,7 +129,9 @@ defmodule ArchTest.ModuleSetTest do
 
     test "union respects exclusions from each set independently" do
       # Set A: Orders.* excluding Checkout
-      a = ModuleSet.new("FixtureApp.Orders.*") |> ModuleSet.excluding("FixtureApp.Orders.Checkout")
+      a =
+        ModuleSet.new("FixtureApp.Orders.*") |> ModuleSet.excluding("FixtureApp.Orders.Checkout")
+
       # Set B: Inventory.*
       b = ModuleSet.new("FixtureApp.Inventory.*")
       ms = ModuleSet.union(a, b)
@@ -155,7 +157,9 @@ defmodule ArchTest.ModuleSetTest do
 
     test "union of disjoint sets has no overlap exclusion effect" do
       # BUG 6 regression: A excludes X, B includes X — X should appear in union
-      a = ModuleSet.new("FixtureApp.Orders.*") |> ModuleSet.excluding("FixtureApp.Orders.Checkout")
+      a =
+        ModuleSet.new("FixtureApp.Orders.*") |> ModuleSet.excluding("FixtureApp.Orders.Checkout")
+
       b = ModuleSet.new("FixtureApp.Orders.Checkout")
       ms = ModuleSet.union(a, b)
       result = ModuleSet.resolve(ms, @graph)

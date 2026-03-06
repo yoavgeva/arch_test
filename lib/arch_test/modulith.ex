@@ -119,6 +119,7 @@ defmodule ArchTest.Modulith do
       |> Enum.reject(&is_nil/1)
 
     slice_names = m.slices |> Keyword.keys() |> Enum.map_join(", ", &":#{&1}")
+
     allowed_str =
       if m.allowed_deps == [] do
         "none declared"
@@ -225,7 +226,11 @@ defmodule ArchTest.Modulith do
     slice_names = m.slices |> Keyword.keys() |> Enum.map_join(", ", &":#{&1}")
     context = "\n  slices: [#{slice_names}]"
 
-    Assertions.assert_no_violations_public(violations, "modulith — should_not_depend_on_each_other", context)
+    Assertions.assert_no_violations_public(
+      violations,
+      "modulith — should_not_depend_on_each_other",
+      context
+    )
   end
 
   # ------------------------------------------------------------------

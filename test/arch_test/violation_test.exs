@@ -89,7 +89,13 @@ defmodule ArchTest.ViolationTest do
     end
 
     test "handles nil caller AND nil callee (message-only forbidden_dep) without crashing" do
-      v = %Violation{type: :forbidden_dep, caller: nil, callee: nil, message: "orphaned violation"}
+      v = %Violation{
+        type: :forbidden_dep,
+        caller: nil,
+        callee: nil,
+        message: "orphaned violation"
+      }
+
       formatted = Violation.format(v)
       assert is_binary(formatted)
       assert String.contains?(formatted, "orphaned violation")
@@ -156,7 +162,9 @@ defmodule ArchTest.ViolationTest do
       header_count =
         result
         |> String.split("\n")
-        |> Enum.count(fn line -> String.contains?(line, "MyApp.A") and not String.contains?(line, "depends on") end)
+        |> Enum.count(fn line ->
+          String.contains?(line, "MyApp.A") and not String.contains?(line, "depends on")
+        end)
 
       # At least one header line for MyApp.A, but not three separate groups
       assert header_count >= 1

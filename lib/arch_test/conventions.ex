@@ -427,8 +427,11 @@ defmodule ArchTest.Conventions do
   defp contains_runtime_error_tuple?({:tuple, _, [{:atom, _, :"Elixir.RuntimeError"} | _]}),
     do: true
 
-  defp contains_runtime_error_tuple?({:map, _, [{:map_field_assoc, _, {:atom, _, :__struct__}, {:atom, _, :"Elixir.RuntimeError"}} | _]}),
-    do: true
+  defp contains_runtime_error_tuple?(
+         {:map, _,
+          [{:map_field_assoc, _, {:atom, _, :__struct__}, {:atom, _, :"Elixir.RuntimeError"}} | _]}
+       ),
+       do: true
 
   # Elixir 1.15+ compiles `raise "msg"` to :erlang.error(RuntimeError.exception("msg"), ...)
   # The first arg is a call to RuntimeError.exception/1 with a binary argument.

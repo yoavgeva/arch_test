@@ -176,5 +176,4 @@ defmodule ArchTest.ModuleSet do
 
   defp passes_custom_filter?(nil, _mod), do: true
   defp passes_custom_filter?(filter_fn, mod), do: filter_fn.(mod)
-
 end

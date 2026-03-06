@@ -28,10 +28,10 @@ defmodule ArchTest.IntegrationTest do
   # ---------------------------------------------------------------------------
 
   describe "Collector.build_graph_from_path/1" do
-    test "loads all 15 fixture modules" do
+    test "loads all 21 fixture modules" do
       g = graph()
       mods = ArchTest.Collector.all_modules(g)
-      assert length(mods) == 15
+      assert length(mods) == 21
     end
 
     test "every FixtureApp module is present as a key" do
@@ -93,21 +93,32 @@ defmodule ArchTest.IntegrationTest do
 
     test "CycleA depends on CycleB" do
       g = graph()
-      assert FixtureApp.Domain.CycleB in ArchTest.Collector.dependencies_of(g, FixtureApp.Domain.CycleA)
+
+      assert FixtureApp.Domain.CycleB in ArchTest.Collector.dependencies_of(
+               g,
+               FixtureApp.Domain.CycleA
+             )
     end
 
     test "CycleB depends on CycleA" do
       g = graph()
-      assert FixtureApp.Domain.CycleA in ArchTest.Collector.dependencies_of(g, FixtureApp.Domain.CycleB)
+
+      assert FixtureApp.Domain.CycleA in ArchTest.Collector.dependencies_of(
+               g,
+               FixtureApp.Domain.CycleB
+             )
     end
 
     test "pure modules have no FixtureApp deps" do
       g = graph()
       # Repo.OrderRepo depends on nothing within FixtureApp
       deps = ArchTest.Collector.dependencies_of(g, FixtureApp.Repo.OrderRepo)
-      fixture_deps = Enum.filter(deps, fn m ->
-        m |> Atom.to_string() |> String.starts_with?("Elixir.FixtureApp")
-      end)
+
+      fixture_deps =
+        Enum.filter(deps, fn m ->
+          m |> Atom.to_string() |> String.starts_with?("Elixir.FixtureApp")
+        end)
+
       assert fixture_deps == []
     end
 
@@ -153,9 +164,12 @@ defmodule ArchTest.IntegrationTest do
     test "leaf modules have empty transitive deps within FixtureApp" do
       g = graph()
       transitive = ArchTest.Collector.transitive_dependencies_of(g, FixtureApp.Repo.OrderRepo)
-      fixture_transitive = Enum.filter(transitive, fn m ->
-        m |> Atom.to_string() |> String.starts_with?("Elixir.FixtureApp")
-      end)
+
+      fixture_transitive =
+        Enum.filter(transitive, fn m ->
+          m |> Atom.to_string() |> String.starts_with?("Elixir.FixtureApp")
+        end)
+
       assert fixture_transitive == []
     end
   end
@@ -174,9 +188,11 @@ defmodule ArchTest.IntegrationTest do
           m |> Atom.to_string() |> String.starts_with?("Elixir.FixtureApp.Domain")
         end)
         |> Enum.map(fn {m, deps} ->
-          fixture_deps = Enum.filter(deps, fn d ->
-            d |> Atom.to_string() |> String.starts_with?("Elixir.FixtureApp.Domain")
-          end)
+          fixture_deps =
+            Enum.filter(deps, fn d ->
+              d |> Atom.to_string() |> String.starts_with?("Elixir.FixtureApp.Domain")
+            end)
+
           {m, fixture_deps}
         end)
         |> Map.new()
@@ -190,15 +206,18 @@ defmodule ArchTest.IntegrationTest do
 
     test "acyclic modules produce no cycles" do
       g = graph()
+
       accounts_graph =
         g
         |> Enum.filter(fn {m, _} ->
           m |> Atom.to_string() |> String.starts_with?("Elixir.FixtureApp.Accounts")
         end)
         |> Enum.map(fn {m, deps} ->
-          fixture_deps = Enum.filter(deps, fn d ->
-            d |> Atom.to_string() |> String.starts_with?("Elixir.FixtureApp.Accounts")
-          end)
+          fixture_deps =
+            Enum.filter(deps, fn d ->
+              d |> Atom.to_string() |> String.starts_with?("Elixir.FixtureApp.Accounts")
+            end)
+
           {m, fixture_deps}
         end)
         |> Map.new()
@@ -227,8 +246,8 @@ defmodule ArchTest.IntegrationTest do
       ms = ArchTest.ModuleSet.new("FixtureApp.**")
       result = ArchTest.ModuleSet.resolve(ms, g)
       # FixtureApp.** matches all descendants but NOT FixtureApp root itself
-      # (** requires at least one dot-segment). 14 = 15 total - 1 root.
-      assert length(result) == 14
+      # (** requires at least one dot-segment). 20 = 21 total - 1 root.
+      assert length(result) == 20
     end
 
     test "ending pattern matches correctly" do
@@ -249,6 +268,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "excluding filters out modules" do
       g = graph()
+
       ms =
         ArchTest.ModuleSet.new("FixtureApp.Orders.*")
         |> ArchTest.ModuleSet.excluding("FixtureApp.Orders.OrderManager")
@@ -282,10 +302,12 @@ defmodule ArchTest.IntegrationTest do
     test "satisfying with custom predicate" do
       g = graph()
       # Select modules that define a struct (have __struct__/0)
-      ms = ArchTest.ModuleSet.satisfying(fn mod ->
-        Code.ensure_loaded(mod)
-        function_exported?(mod, :__struct__, 0)
-      end)
+      ms =
+        ArchTest.ModuleSet.satisfying(fn mod ->
+          Code.ensure_loaded(mod)
+          function_exported?(mod, :__struct__, 0)
+        end)
+
       result = ArchTest.ModuleSet.resolve(ms, g)
       assert FixtureApp.Inventory.Item in result
       assert FixtureApp.Domain.Order in result
@@ -300,6 +322,7 @@ defmodule ArchTest.IntegrationTest do
   describe "assertions that PASS on the real graph" do
     test "Accounts modules have no deps on Orders" do
       g = graph()
+
       assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Accounts.**")
         |> ArchTest.Assertions.should_not_depend_on(
@@ -311,6 +334,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "Domain.Order has no deps on Web" do
       g = graph()
+
       assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Domain.Order")
         |> ArchTest.Assertions.should_not_depend_on(
@@ -322,6 +346,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "Repo layer not called by Accounts" do
       g = graph()
+
       assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Repo.*")
         |> ArchTest.Assertions.should_not_be_called_by(
@@ -333,6 +358,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "no Manager modules in Accounts context" do
       g = graph()
+
       assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Accounts.**.*Manager")
         |> ArchTest.Assertions.should_not_exist(graph: g)
@@ -341,6 +367,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "Accounts.User resides under FixtureApp.Accounts" do
       g = graph()
+
       assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Accounts.*")
         |> ArchTest.Assertions.should_reside_under("FixtureApp.Accounts.*", graph: g)
@@ -349,6 +376,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "Repo modules match **.*Repo naming" do
       g = graph()
+
       assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Repo.*")
         |> ArchTest.Assertions.should_have_name_matching("**.*Repo", graph: g)
@@ -357,6 +385,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "Accounts context is free of cycles" do
       g = graph()
+
       assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Accounts.**")
         |> ArchTest.Assertions.should_be_free_of_cycles(graph: g)
@@ -365,6 +394,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "Inventory context is free of cycles" do
       g = graph()
+
       assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Inventory.**")
         |> ArchTest.Assertions.should_be_free_of_cycles(graph: g)
@@ -373,6 +403,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "custom satisfying rule passes for OrderManager" do
       g = graph()
+
       assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Orders.OrderManager")
         |> ArchTest.Assertions.satisfying(fn _graph, _mod -> [] end, graph: g)
@@ -387,116 +418,128 @@ defmodule ArchTest.IntegrationTest do
   describe "assertions that FAIL on the real graph (catching intentional violations)" do
     test "detects Checkout → Inventory.Repo (forbidden dep)" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Orders.**")
         |> ArchTest.Assertions.should_not_depend_on(
           ArchTest.ModuleSet.new("FixtureApp.Inventory.*"),
           graph: g
         )
-      end
+      end)
     end
 
     test "detects OrderService → Repo.OrderRepo (forbidden dep)" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Orders.**")
         |> ArchTest.Assertions.should_not_depend_on(
           ArchTest.ModuleSet.new("FixtureApp.Repo.*"),
           graph: g
         )
-      end
+      end)
     end
 
     test "detects Web.Controller → Repo.OrderRepo (web calling repo directly)" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Web.**")
         |> ArchTest.Assertions.should_not_depend_on(
           ArchTest.ModuleSet.new("FixtureApp.Repo.*"),
           graph: g
         )
-      end
+      end)
     end
 
     test "should_only_depend_on detects Checkout dep outside allowed set" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         # Checkout should only depend on Orders internals, but it calls InventoryRepo
         ArchTest.ModuleSet.new("FixtureApp.Orders.*")
         |> ArchTest.Assertions.should_only_depend_on(
           ArchTest.ModuleSet.new("FixtureApp.Orders.**"),
           graph: g
         )
-      end
+      end)
     end
 
     test "should_not_be_called_by detects Repo.OrderRepo called by Web" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Repo.*")
         |> ArchTest.Assertions.should_not_be_called_by(
           ArchTest.ModuleSet.new("FixtureApp.Web.**"),
           graph: g
         )
-      end
+      end)
     end
 
     test "should_not_be_called_by detects Repo.OrderRepo called by Orders.OrderService" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Repo.*")
         |> ArchTest.Assertions.should_not_be_called_by(
           ArchTest.ModuleSet.new("FixtureApp.Orders.**"),
           graph: g
         )
-      end
+      end)
     end
 
     test "detects OrderManager (naming violation — *Manager exists)" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.**.*Manager")
         |> ArchTest.Assertions.should_not_exist(graph: g)
-      end
+      end)
     end
 
     test "should_reside_under detects Inventory.Repo not in Schemas namespace" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Inventory.*")
         |> ArchTest.Assertions.should_reside_under("FixtureApp.Inventory.Schemas.*", graph: g)
-      end
+      end)
     end
 
     test "should_have_name_matching detects Checkout doesn't end with Service" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Orders.*")
         |> ArchTest.Assertions.should_have_name_matching("**.*Service", graph: g)
-      end
+      end)
     end
 
     test "should_be_free_of_cycles detects CycleA ↔ CycleB" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Domain.**")
         |> ArchTest.Assertions.should_be_free_of_cycles(graph: g)
-      end
+      end)
     end
 
     test "should_not_transitively_depend_on detects Checkout → Inventory.Repo transitively" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Orders.Checkout")
         |> ArchTest.Assertions.should_not_transitively_depend_on(
           ArchTest.ModuleSet.new("FixtureApp.Inventory.*"),
           graph: g
         )
-      end
+      end)
     end
 
     test "violation message contains caller and callee module names" do
       g = graph()
+
       error =
         assert_raise ExUnit.AssertionError, fn ->
           ArchTest.ModuleSet.new("FixtureApp.Orders.**")
@@ -512,6 +555,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "violation message includes violation count" do
       g = graph()
+
       error =
         assert_raise ExUnit.AssertionError, fn ->
           ArchTest.ModuleSet.new("FixtureApp.**")
@@ -532,14 +576,15 @@ defmodule ArchTest.IntegrationTest do
   describe "Modulith enforcement on real graph" do
     test "enforce_isolation detects Checkout accessing Inventory internals" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.Modulith.define_slices(
           orders: "FixtureApp.Orders",
           inventory: "FixtureApp.Inventory",
           accounts: "FixtureApp.Accounts"
         )
         |> do_enforce_isolation(g)
-      end
+      end)
     end
 
     test "allow_dependency(:orders, :accounts) permits Orders → Accounts public root" do
@@ -564,7 +609,8 @@ defmodule ArchTest.IntegrationTest do
 
     test "Accounts has no cross-context violations" do
       g = graph()
-      assert_passes fn ->
+
+      assert_passes(fn ->
         ArchTest.Modulith.define_slices(
           orders: "FixtureApp.Orders",
           inventory: "FixtureApp.Inventory",
@@ -572,19 +618,19 @@ defmodule ArchTest.IntegrationTest do
         )
         |> ArchTest.Modulith.allow_dependency(:orders, :accounts)
         |> do_enforce_isolation_only_accounts(g)
-      end
+      end)
     end
 
     test "slice cycle detection finds no cycles in acyclic slice graph" do
       g = graph()
       # Orders → Accounts, nothing back: no cycle
-      assert_passes fn ->
+      assert_passes(fn ->
         ArchTest.Modulith.define_slices(
           orders: "FixtureApp.Orders",
           accounts: "FixtureApp.Accounts"
         )
         |> do_check_slice_cycles(g)
-      end
+      end)
     end
   end
 
@@ -595,14 +641,15 @@ defmodule ArchTest.IntegrationTest do
   describe "Layer direction enforcement on real graph" do
     test "detects Repo.OrderRepo as having no deps on higher layers (repo is bottom)" do
       g = graph()
-      assert_passes fn ->
+
+      assert_passes(fn ->
         # Repo has no deps on Web or Orders
         ArchTest.ModuleSet.new("FixtureApp.Repo.*")
         |> ArchTest.Assertions.should_not_depend_on(
           ArchTest.ModuleSet.new("FixtureApp.Web.**"),
           graph: g
         )
-      end
+      end)
     end
 
     test "detects Web.Controller calling Repo directly (upward-skip violation)" do
@@ -610,24 +657,26 @@ defmodule ArchTest.IntegrationTest do
       # Web should not skip context and call repo directly.
       # We verify this by checking Web doesn't call Repo.
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Web.**")
         |> ArchTest.Assertions.should_not_depend_on(
           ArchTest.ModuleSet.new("FixtureApp.Repo.*"),
           graph: g
         )
-      end
+      end)
     end
 
     test "Domain.Order is free of any FixtureApp deps (pure domain)" do
       g = graph()
-      assert_passes fn ->
+
+      assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Domain.Order")
         |> ArchTest.Assertions.should_not_depend_on(
           ArchTest.ModuleSet.new("FixtureApp.**"),
           graph: g
         )
-      end
+      end)
     end
   end
 
@@ -652,14 +701,16 @@ defmodule ArchTest.IntegrationTest do
 
     test "all Repo-layer modules end with Repo" do
       g = graph()
-      assert_passes fn ->
+
+      assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Repo.*")
         |> ArchTest.Assertions.should_have_name_matching("**.*Repo", graph: g)
-      end
+      end)
     end
 
     test "should_not_exist catches OrderManager" do
       g = graph()
+
       error =
         assert_raise ExUnit.AssertionError, fn ->
           ArchTest.ModuleSet.new("FixtureApp.**.*Manager")
@@ -677,6 +728,7 @@ defmodule ArchTest.IntegrationTest do
   describe "cycle detection on real graph" do
     test "detects CycleA ↔ CycleB as a cycle" do
       g = graph()
+
       error =
         assert_raise ExUnit.AssertionError, fn ->
           ArchTest.ModuleSet.new("FixtureApp.Domain.**")
@@ -688,18 +740,20 @@ defmodule ArchTest.IntegrationTest do
 
     test "full FixtureApp has at least one cycle" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.**")
         |> ArchTest.Assertions.should_be_free_of_cycles(graph: g)
-      end
+      end)
     end
 
     test "Order (non-cyclic) module in isolation is cycle-free" do
       g = graph()
-      assert_passes fn ->
+
+      assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Domain.Order")
         |> ArchTest.Assertions.should_be_free_of_cycles(graph: g)
-      end
+      end)
     end
   end
 
@@ -710,20 +764,25 @@ defmodule ArchTest.IntegrationTest do
   describe "satisfying/2 custom rules on real graph" do
     test "custom rule that always passes returns :ok" do
       g = graph()
-      assert_passes fn ->
+
+      assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.**")
         |> ArchTest.Assertions.satisfying(fn _graph, _mod -> [] end, graph: g)
-      end
+      end)
     end
 
     test "custom rule that always fails raises" do
       g = graph()
-      assert_violation fn ->
+
+      assert_violation(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Orders")
-        |> ArchTest.Assertions.satisfying(fn _graph, mod ->
-          [%ArchTest.Violation{type: :custom, module: mod, message: "always fails"}]
-        end, graph: g)
-      end
+        |> ArchTest.Assertions.satisfying(
+          fn _graph, mod ->
+            [%ArchTest.Violation{type: :custom, module: mod, message: "always fails"}]
+          end,
+          graph: g
+        )
+      end)
     end
 
     test "custom rule checking for struct modules" do
@@ -731,16 +790,25 @@ defmodule ArchTest.IntegrationTest do
       # All modules in Accounts.** should NOT define a struct if they're the root
       root_non_structs = [FixtureApp.Accounts]
 
-      assert_passes fn ->
+      assert_passes(fn ->
         ArchTest.ModuleSet.new("FixtureApp.Accounts")
-        |> ArchTest.Assertions.satisfying(fn _graph, mod ->
-          if mod in root_non_structs and function_exported?(mod, :__struct__, 0) do
-            [%ArchTest.Violation{type: :custom, module: mod, message: "root should not be struct"}]
-          else
-            []
-          end
-        end, graph: g)
-      end
+        |> ArchTest.Assertions.satisfying(
+          fn _graph, mod ->
+            if mod in root_non_structs and function_exported?(mod, :__struct__, 0) do
+              [
+                %ArchTest.Violation{
+                  type: :custom,
+                  module: mod,
+                  message: "root should not be struct"
+                }
+              ]
+            else
+              []
+            end
+          end,
+          graph: g
+        )
+      end)
     end
   end
 
@@ -767,22 +835,24 @@ defmodule ArchTest.IntegrationTest do
     test "instability is between 0 and 1" do
       g = graph()
       all_metrics = ArchTest.Metrics.martin("FixtureApp.**", graph: g)
+
       Enum.each(all_metrics, fn {_mod, m} ->
         assert m.instability >= 0.0
         assert m.instability <= 1.0
       end)
     end
 
-    test "martin/1 returns metrics for all FixtureApp descendants (14 — root excluded by **)" do
+    test "martin/1 returns metrics for all FixtureApp descendants (20 — root excluded by **)" do
       g = graph()
       all_metrics = ArchTest.Metrics.martin("FixtureApp.**", graph: g)
-      # FixtureApp.** matches 14 modules (excludes FixtureApp root)
-      assert map_size(all_metrics) == 14
+      # FixtureApp.** matches 20 modules (excludes FixtureApp root)
+      assert map_size(all_metrics) == 20
     end
 
     test "distance is between 0 and 1" do
       g = graph()
       all_metrics = ArchTest.Metrics.martin("FixtureApp.**", graph: g)
+
       Enum.each(all_metrics, fn {_mod, m} ->
         assert m.distance >= 0.0
         assert m.distance <= 1.0
@@ -804,7 +874,7 @@ defmodule ArchTest.IntegrationTest do
       g = graph()
 
       # First run with no baseline: all violations are "new" → test fails
-      assert_violation fn ->
+      assert_violation(fn ->
         ArchTest.Freeze.freeze("checkout_violation", fn ->
           ArchTest.ModuleSet.new("FixtureApp.Orders.**")
           |> ArchTest.Assertions.should_not_depend_on(
@@ -812,7 +882,7 @@ defmodule ArchTest.IntegrationTest do
             graph: g
           )
         end)
-      end
+      end)
     end
 
     @tag :tmp_dir
@@ -849,12 +919,12 @@ defmodule ArchTest.IntegrationTest do
       assert FixtureApp.Orders.Checkout in result
     end
 
-    test "all_modules resolves all 15 fixture modules" do
+    test "all_modules resolves all 21 fixture modules" do
       g = graph()
       ms = ArchTest.all_modules()
       result = ArchTest.ModuleSet.resolve(ms, g)
       # all_modules() uses "**" which matches single-segment names too
-      assert length(result) == 15
+      assert length(result) == 21
     end
 
     test "modules_in resolves direct children" do
@@ -868,6 +938,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "excluding composes correctly" do
       g = graph()
+
       result =
         ArchTest.modules_matching("FixtureApp.Orders.*")
         |> ArchTest.excluding("FixtureApp.Orders.OrderManager")
@@ -879,6 +950,7 @@ defmodule ArchTest.IntegrationTest do
 
     test "union combines two sets" do
       g = graph()
+
       result =
         ArchTest.modules_matching("FixtureApp.Orders")
         |> ArchTest.union(ArchTest.modules_matching("FixtureApp.Accounts"))
@@ -905,8 +977,10 @@ defmodule ArchTest.IntegrationTest do
         "FixtureApp.Orders.Checkout",
         "FixtureApp.Domain.CycleA"
       ]
+
       Enum.each(mods, fn m ->
-        assert ArchTest.Pattern.matches?("FixtureApp.**", m), "Expected #{m} to match FixtureApp.**"
+        assert ArchTest.Pattern.matches?("FixtureApp.**", m),
+               "Expected #{m} to match FixtureApp.**"
       end)
     end
 
@@ -1047,7 +1121,9 @@ defmodule ArchTest.IntegrationTest do
       mod_str =
         mod
         |> Atom.to_string()
-        |> then(fn s -> if String.starts_with?(s, "Elixir."), do: String.slice(s, 7..-1//1), else: s end)
+        |> then(fn s ->
+          if String.starts_with?(s, "Elixir."), do: String.slice(s, 7..-1//1), else: s
+        end)
 
       ArchTest.Pattern.matches?(children_pattern, mod_str) or
         ArchTest.Pattern.matches?(root_namespace, mod_str)
