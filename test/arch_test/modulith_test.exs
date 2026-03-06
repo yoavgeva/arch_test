@@ -273,9 +273,7 @@ defmodule ArchTest.ModulithTest do
 
       # Without the :except it should fail
       assert_raise ExUnit.AssertionError, ~r/FixtureApp.Application/, fn ->
-        Modulith.all_modules_covered_by(modulith, "FixtureApp.**",
-          graph: @covered_graph
-        )
+        Modulith.all_modules_covered_by(modulith, "FixtureApp.**", graph: @covered_graph)
       end
     end
 
