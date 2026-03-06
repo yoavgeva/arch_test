@@ -1,0 +1,276 @@
+# ArchTest Cheatsheet
+
+{: .col-2}
+
+## Module Selection
+
+### Glob patterns
+
+```elixir
+modules_matching("MyApp.Orders.*")      # direct children only
+modules_matching("MyApp.Orders.**")     # all descendants
+modules_matching("**.*Service")         # last segment ends with Service
+modules_matching("**.*Service*")        # last segment contains Service
+modules_matching("MyApp.**.*Repo")      # under MyApp, ends with Repo
+modules_in("MyApp.Orders")             # shorthand for "MyApp.Orders.*"
+all_modules()                          # every loaded module
+```
+
+### Custom predicate
+
+```elixir
+modules_satisfying(fn mod ->
+  function_exported?(mod, :__schema__, 1)
+end)
+```
+
+### Composing sets
+
+```elixir
+modules_matching("MyApp.**")
+|> excluding("MyApp.Web.*")
+
+modules_matching("**.*Service")
+|> union(modules_matching("**.*View"))
+
+modules_matching("MyApp.**")
+|> intersection(modules_matching("**.*Schema"))
+```
+
+## Pattern Reference
+
+| Pattern | Matches |
+|---------|---------|
+| `"MyApp.Orders"` | Exact match only |
+| `"MyApp.Orders.*"` | Direct children (`MyApp.Orders.Order`) |
+| `"MyApp.Orders.**"` | All descendants at any depth |
+| `"**.*Service"` | Any module whose last segment ends with `Service` |
+| `"**.*Service*"` | Any module whose last segment contains `Service` |
+| `"MyApp.**.*Repo"` | Under `MyApp`, last segment ends with `Repo` |
+| `"**"` | All modules |
+
+## Dependency Rules
+
+### Forbid
+
+```elixir
+modules_matching("MyApp.Domain.**")
+|> should_not_depend_on(modules_matching("MyApp.Web.**"))
+```
+
+### Allowlist
+
+```elixir
+modules_matching("MyApp.Web.**")
+|> should_only_depend_on(modules_matching("MyApp.Domain.**"))
+```
+
+### Caller restriction
+
+```elixir
+modules_matching("MyApp.Repo")
+|> should_only_be_called_by(modules_matching("MyApp.Domain.**"))
+
+modules_matching("MyApp.Repo")
+|> should_not_be_called_by(modules_matching("MyApp.Web.**"))
+```
+
+### Transitive
+
+```elixir
+modules_matching("MyApp.Domain.**")
+|> should_not_transitively_depend_on(modules_matching("Ecto.**"))
+```
+
+### Cycles
+
+```elixir
+modules_matching("MyApp.**") |> should_be_free_of_cycles()
+```
+
+## Naming Rules
+
+```elixir
+# Ban a naming convention
+modules_matching("MyApp.**.*Manager") |> should_not_exist()
+
+# Enforce namespace
+modules_satisfying(fn m -> function_exported?(m, :__schema__, 1) end)
+|> should_reside_under("MyApp.**.Schemas")
+
+# Enforce name pattern
+modules_matching("MyApp.Web.**")
+|> should_have_name_matching("**.*Controller")
+
+# Count
+modules_matching("MyApp.**.*God")
+|> should_have_module_count(max: 0)
+```
+
+## Behaviour / Protocol / Attribute Rules
+
+```elixir
+modules_matching("MyApp.Workers.**")
+|> should_implement_behaviour(Oban.Worker)
+
+modules_matching("MyApp.Domain.**")
+|> should_not_implement_behaviour(Plug)
+
+modules_matching("MyApp.**.*Schema")
+|> should_implement_protocol(Jason.Encoder)
+
+modules_matching("MyApp.**")
+|> should_have_attribute(:moduledoc)
+
+modules_matching("MyApp.**")
+|> should_not_have_attribute_value(:deprecated, true)
+```
+
+## Function Rules
+
+```elixir
+modules_matching("MyApp.Domain.**")
+|> should_export(:call, 2)
+
+modules_matching("MyApp.Web.**")
+|> should_not_export(:__impl__, 1)
+
+modules_matching("MyApp.**")
+|> should_use(Phoenix.Controller)
+
+modules_matching("MyApp.Domain.**")
+|> should_not_use(Plug)
+```
+
+## Layered Architecture
+
+### Classic layers (top → bottom)
+
+```elixir
+define_layers(
+  web:     "MyApp.Web.**",
+  context: "MyApp.**",
+  repo:    "MyApp.Repo.**"
+)
+|> enforce_direction()
+```
+
+### Onion / hexagonal (innermost first)
+
+```elixir
+define_onion(
+  domain:      "MyApp.Domain.**",
+  application: "MyApp.Application.**",
+  adapters:    "MyApp.Adapters.**",
+  web:         "MyApp.Web.**"
+)
+|> enforce_onion_rules()
+```
+
+## Modulith / Bounded Contexts
+
+### Enforce isolation
+
+```elixir
+define_slices(
+  orders:    "MyApp.Orders",
+  inventory: "MyApp.Inventory",
+  accounts:  "MyApp.Accounts"
+)
+|> allow_dependency(:orders, :accounts)
+|> allow_dependency(:orders, :inventory)
+|> enforce_isolation()
+```
+
+### Strict (zero cross-context deps)
+
+```elixir
+define_slices(
+  core:    "MyApp.Core",
+  plugins: "MyApp.Plugins"
+)
+|> should_not_depend_on_each_other()
+```
+
+### Cycle detection
+
+```elixir
+define_slices([...]) |> should_be_free_of_cycles()
+```
+
+## Code Conventions
+
+```elixir
+use ArchTest.Conventions
+
+no_io_puts_in(modules_matching("MyApp.**"))
+no_process_sleep_in(modules_matching("MyApp.**"))
+no_application_get_env_in(modules_matching("MyApp.Domain.**"))
+no_dbg_in(modules_matching("MyApp.**"))
+no_raise_string_in(modules_matching("MyApp.**"))
+no_plug_in(modules_matching("MyApp.Domain.**"))
+all_public_functions_documented(modules_matching("MyApp.**.*Repo"))
+```
+
+## Coupling Metrics
+
+```elixir
+alias ArchTest.Metrics
+
+# Martin metrics for a namespace
+# %{Module => %{instability: 0.6, abstractness: 0.0, distance: 0.4}}
+metrics = Metrics.martin("MyApp.**")
+
+Enum.each(metrics, fn {mod, m} ->
+  assert m.distance < 0.5, "#{mod} too far from main sequence"
+end)
+
+# Single module
+Metrics.instability("MyApp.Orders")    # 0.0..1.0
+Metrics.abstractness("MyApp.Orders")   # 0.0..1.0
+
+# Afferent / efferent coupling counts
+Metrics.afferent("MyApp.Orders")       # who depends on Orders
+Metrics.efferent("MyApp.Orders")       # who Orders depends on
+```
+
+## Gradual Adoption (Freeze)
+
+```elixir
+# Wrap any rule with freeze/2 to baseline current violations
+ArchTest.Freeze.freeze("domain_web_deps", fn ->
+  modules_matching("MyApp.Domain.**")
+  |> should_not_depend_on(modules_matching("MyApp.Web.**"))
+end)
+```
+
+```sh
+# Establish or update the baseline
+ARCH_TEST_UPDATE_FREEZE=true mix test
+```
+
+Baseline files live in `test/arch_test_violations/`. Commit them. Delete the file when all violations are fixed.
+
+## Setup
+
+### Single app
+
+```elixir
+defmodule MyApp.ArchTest do
+  use ExUnit.Case
+  use ArchTest
+end
+```
+
+### Umbrella — scope to one app
+
+```elixir
+use ArchTest, app: :my_app
+```
+
+### Configure freeze directory
+
+```elixir
+# config/test.exs
+config :arch_test, freeze_store: "test/arch_violations"
+```
