@@ -237,7 +237,8 @@ defmodule ArchTest.AssertionsTest do
       graph = %{ArchTest.Pattern => []}
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Pattern end)
 
-      assert ArchTest.Assertions.should_not_implement_behaviour(ms, GenServer, graph: graph) == :ok
+      assert ArchTest.Assertions.should_not_implement_behaviour(ms, GenServer, graph: graph) ==
+               :ok
     end
 
     test "fails when module implements the forbidden behaviour" do
@@ -275,7 +276,8 @@ defmodule ArchTest.AssertionsTest do
       graph = %{ArchTest.Pattern => []}
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Pattern end)
 
-      assert ArchTest.Assertions.should_not_implement_protocol(ms, Enumerable, graph: graph) == :ok
+      assert ArchTest.Assertions.should_not_implement_protocol(ms, Enumerable, graph: graph) ==
+               :ok
     end
 
     test "fails when module implements the forbidden protocol" do
@@ -294,7 +296,11 @@ defmodule ArchTest.AssertionsTest do
       # FixtureApp.Repo.OrderRepo is called by OrderService AND Web.Controller
       # Allow both → should pass
       object = ModuleSet.new("FixtureApp.Repo.*")
-      allowed = ModuleSet.new("FixtureApp.Orders.**") |> ModuleSet.union(ModuleSet.new("FixtureApp.Web.*"))
+
+      allowed =
+        ModuleSet.new("FixtureApp.Orders.**")
+        |> ModuleSet.union(ModuleSet.new("FixtureApp.Web.*"))
+
       assert ArchTest.Assertions.should_only_be_called_by(object, allowed, graph: @graph) == :ok
     end
 
@@ -331,7 +337,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/custom note/, fn ->
         ArchTest.Assertions.should_only_be_called_by(object, allowed,
-          graph: @graph, message: "custom note")
+          graph: @graph,
+          message: "custom note"
+        )
       end
     end
   end
@@ -386,7 +394,10 @@ defmodule ArchTest.AssertionsTest do
     test "passes when module does not have the attribute" do
       graph = %{ArchTest.Pattern => []}
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Pattern end)
-      assert ArchTest.Assertions.should_not_have_attribute(ms, :nonexistent_attr_xyz, graph: graph) == :ok
+
+      assert ArchTest.Assertions.should_not_have_attribute(ms, :nonexistent_attr_xyz,
+               graph: graph
+             ) == :ok
     end
 
     test "fails when module has the forbidden attribute" do
@@ -414,7 +425,10 @@ defmodule ArchTest.AssertionsTest do
       # Enumerable has behaviour: [Protocol]
       graph = %{Enumerable => []}
       ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
-      assert ArchTest.Assertions.should_have_attribute_value(ms, :behaviour, [Protocol], graph: graph) == :ok
+
+      assert ArchTest.Assertions.should_have_attribute_value(ms, :behaviour, [Protocol],
+               graph: graph
+             ) == :ok
     end
 
     test "fails when attribute has a different value" do
@@ -440,7 +454,9 @@ defmodule ArchTest.AssertionsTest do
       # Keyword.get returns nil for missing keys, which equals nil
       graph = %{ArchTest.Violation => []}
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Violation end)
-      assert ArchTest.Assertions.should_have_attribute_value(ms, :nonexistent, nil, graph: graph) == :ok
+
+      assert ArchTest.Assertions.should_have_attribute_value(ms, :nonexistent, nil, graph: graph) ==
+               :ok
     end
   end
 
@@ -449,7 +465,10 @@ defmodule ArchTest.AssertionsTest do
       # Enumerable has behaviour: [Protocol], not [GenServer]
       graph = %{Enumerable => []}
       ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
-      assert ArchTest.Assertions.should_not_have_attribute_value(ms, :behaviour, [GenServer], graph: graph) == :ok
+
+      assert ArchTest.Assertions.should_not_have_attribute_value(ms, :behaviour, [GenServer],
+               graph: graph
+             ) == :ok
     end
 
     test "fails when attribute has the forbidden value" do
@@ -458,14 +477,19 @@ defmodule ArchTest.AssertionsTest do
       ms = ModuleSet.satisfying(fn mod -> mod == Enumerable end)
 
       assert_raise ExUnit.AssertionError, ~r/should_not_have_attribute_value/, fn ->
-        ArchTest.Assertions.should_not_have_attribute_value(ms, :behaviour, [Protocol], graph: graph)
+        ArchTest.Assertions.should_not_have_attribute_value(ms, :behaviour, [Protocol],
+          graph: graph
+        )
       end
     end
 
     test "passes when attribute does not exist (nil != forbidden value)" do
       graph = %{ArchTest.Violation => []}
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Violation end)
-      assert ArchTest.Assertions.should_not_have_attribute_value(ms, :nonexistent, [Protocol], graph: graph) == :ok
+
+      assert ArchTest.Assertions.should_not_have_attribute_value(ms, :nonexistent, [Protocol],
+               graph: graph
+             ) == :ok
     end
   end
 
@@ -572,7 +596,9 @@ defmodule ArchTest.AssertionsTest do
       graph = %{ArchTest.Pattern => []}
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Pattern end)
       # ArchTest.Pattern has matches?/2 -- pattern "matches*" should match
-      assert ArchTest.Assertions.should_have_public_functions_matching(ms, "matches*", graph: graph) == :ok
+      assert ArchTest.Assertions.should_have_public_functions_matching(ms, "matches*",
+               graph: graph
+             ) == :ok
     end
 
     test "fails when no function matches the pattern" do
@@ -580,7 +606,9 @@ defmodule ArchTest.AssertionsTest do
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Pattern end)
 
       assert_raise ExUnit.AssertionError, ~r/should_have_public_functions_matching/, fn ->
-        ArchTest.Assertions.should_have_public_functions_matching(ms, "nonexistent_prefix_xyz*", graph: graph)
+        ArchTest.Assertions.should_have_public_functions_matching(ms, "nonexistent_prefix_xyz*",
+          graph: graph
+        )
       end
     end
 
@@ -598,7 +626,10 @@ defmodule ArchTest.AssertionsTest do
     test "passes when no function matches the forbidden pattern" do
       graph = %{ArchTest.Pattern => []}
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Pattern end)
-      assert ArchTest.Assertions.should_not_have_public_functions_matching(ms, "zzz*", graph: graph) == :ok
+
+      assert ArchTest.Assertions.should_not_have_public_functions_matching(ms, "zzz*",
+               graph: graph
+             ) == :ok
     end
 
     test "fails when a function matches the forbidden pattern" do
@@ -606,7 +637,9 @@ defmodule ArchTest.AssertionsTest do
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Pattern end)
       # ArchTest.Pattern has compile/1 -- pattern "compile*" should match it
       assert_raise ExUnit.AssertionError, ~r/should_not_have_public_functions_matching/, fn ->
-        ArchTest.Assertions.should_not_have_public_functions_matching(ms, "compile*", graph: graph)
+        ArchTest.Assertions.should_not_have_public_functions_matching(ms, "compile*",
+          graph: graph
+        )
       end
     end
 
@@ -615,7 +648,9 @@ defmodule ArchTest.AssertionsTest do
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Pattern end)
 
       assert_raise ExUnit.AssertionError, ~r/compile\/1/, fn ->
-        ArchTest.Assertions.should_not_have_public_functions_matching(ms, "compile*", graph: graph)
+        ArchTest.Assertions.should_not_have_public_functions_matching(ms, "compile*",
+          graph: graph
+        )
       end
     end
   end
@@ -627,7 +662,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/custom note here/, fn ->
         ArchTest.Assertions.should_have_attribute(ms, :nonexistent_attr_xyz,
-          graph: graph, message: "custom note here")
+          graph: graph,
+          message: "custom note here"
+        )
       end
     end
   end
@@ -655,7 +692,9 @@ defmodule ArchTest.AssertionsTest do
     test "passes with exactly constraint" do
       ms = ModuleSet.new("FixtureApp.Orders.*")
       count = ms |> ModuleSet.resolve(@graph) |> length()
-      assert ArchTest.Assertions.should_have_module_count(ms, exactly: count, graph: @graph) == :ok
+
+      assert ArchTest.Assertions.should_have_module_count(ms, exactly: count, graph: @graph) ==
+               :ok
     end
 
     test "fails when exactly constraint not met" do
@@ -682,7 +721,9 @@ defmodule ArchTest.AssertionsTest do
     test "passes with at_most constraint" do
       ms = ModuleSet.new("FixtureApp.Orders.*")
       count = ms |> ModuleSet.resolve(@graph) |> length()
-      assert ArchTest.Assertions.should_have_module_count(ms, at_most: count, graph: @graph) == :ok
+
+      assert ArchTest.Assertions.should_have_module_count(ms, at_most: count, graph: @graph) ==
+               :ok
     end
 
     test "fails with at_most when too many modules" do
@@ -695,7 +736,9 @@ defmodule ArchTest.AssertionsTest do
 
     test "passes with less_than constraint" do
       ms = ModuleSet.new("FixtureApp.Orders.*")
-      assert ArchTest.Assertions.should_have_module_count(ms, less_than: 100, graph: @graph) == :ok
+
+      assert ArchTest.Assertions.should_have_module_count(ms, less_than: 100, graph: @graph) ==
+               :ok
     end
 
     test "fails with less_than when count is not less" do
@@ -722,7 +765,12 @@ defmodule ArchTest.AssertionsTest do
     test "passes with at_least and at_most range" do
       ms = ModuleSet.new("FixtureApp.Orders.*")
       count = ms |> ModuleSet.resolve(@graph) |> length()
-      assert ArchTest.Assertions.should_have_module_count(ms, at_least: 1, at_most: count, graph: @graph) == :ok
+
+      assert ArchTest.Assertions.should_have_module_count(ms,
+               at_least: 1,
+               at_most: count,
+               graph: @graph
+             ) == :ok
     end
 
     test "error message contains actual count" do
@@ -745,7 +793,11 @@ defmodule ArchTest.AssertionsTest do
       ms = ModuleSet.new("NoMatch.**")
 
       assert_raise ExUnit.AssertionError, ~r/too many modules/, fn ->
-        ArchTest.Assertions.should_have_module_count(ms, at_least: 1, graph: @graph, message: "too many modules")
+        ArchTest.Assertions.should_have_module_count(ms,
+          at_least: 1,
+          graph: @graph,
+          message: "too many modules"
+        )
       end
     end
 
@@ -769,7 +821,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_not_depend_on(subject, object,
-          graph: @graph, message: "my custom message")
+          graph: @graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -781,7 +835,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_only_depend_on(subject, allowed,
-          graph: @graph, message: "my custom message")
+          graph: @graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -793,7 +849,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_not_be_called_by(object, callers,
-          graph: @graph, message: "my custom message")
+          graph: @graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -805,7 +863,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_only_be_called_by(object, allowed,
-          graph: @graph, message: "my custom message")
+          graph: @graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -817,7 +877,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_not_transitively_depend_on(subject, object,
-          graph: @graph, message: "my custom message")
+          graph: @graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -827,8 +889,7 @@ defmodule ArchTest.AssertionsTest do
       subject = ModuleSet.new("**.*Manager")
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
-        ArchTest.Assertions.should_not_exist(subject,
-          graph: @graph, message: "my custom message")
+        ArchTest.Assertions.should_not_exist(subject, graph: @graph, message: "my custom message")
       end
     end
   end
@@ -839,7 +900,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_reside_under(subject, "FixtureApp.Inventory.Schemas.*",
-          graph: @graph, message: "my custom message")
+          graph: @graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -850,7 +913,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_have_name_matching(subject, "**.*Repo",
-          graph: @graph, message: "my custom message")
+          graph: @graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -861,7 +926,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_be_free_of_cycles(subject,
-          graph: @graph, message: "my custom message")
+          graph: @graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -873,7 +940,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_export(ms, :nonexistent_function, 99,
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -885,7 +954,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_not_export(ms, :compile, 1,
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -897,7 +968,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_have_public_functions_matching(ms, "zzz*",
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -909,7 +982,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_not_have_public_functions_matching(ms, "compile*",
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -920,7 +995,10 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_have_module_count(ms,
-          exactly: 999, graph: @graph, message: "my custom message")
+          exactly: 999,
+          graph: @graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -934,8 +1012,7 @@ defmodule ArchTest.AssertionsTest do
       end
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
-        ArchTest.Assertions.satisfying(ms, check_fn,
-          graph: @graph, message: "my custom message")
+        ArchTest.Assertions.satisfying(ms, check_fn, graph: @graph, message: "my custom message")
       end
     end
   end
@@ -947,7 +1024,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_implement_behaviour(ms, GenServer,
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -959,7 +1038,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_not_implement_behaviour(ms, Inspect,
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -971,7 +1052,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_implement_protocol(ms, Enumerable,
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -983,7 +1066,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_not_implement_protocol(ms, Enumerable,
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -995,7 +1080,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_have_attribute(ms, :nonexistent_attr_xyz,
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -1007,7 +1094,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_not_have_attribute(ms, :vsn,
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -1019,7 +1108,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_have_attribute_value(ms, :behaviour, [GenServer],
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -1031,7 +1122,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_not_have_attribute_value(ms, :behaviour, [Protocol],
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -1042,8 +1135,7 @@ defmodule ArchTest.AssertionsTest do
       ms = ModuleSet.satisfying(fn mod -> mod == ArchTest.Violation end)
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
-        ArchTest.Assertions.should_use(ms, GenServer,
-          graph: graph, message: "my custom message")
+        ArchTest.Assertions.should_use(ms, GenServer, graph: graph, message: "my custom message")
       end
     end
   end
@@ -1055,7 +1147,9 @@ defmodule ArchTest.AssertionsTest do
 
       assert_raise ExUnit.AssertionError, ~r/my custom message/, fn ->
         ArchTest.Assertions.should_not_use(ms, Protocol,
-          graph: graph, message: "my custom message")
+          graph: graph,
+          message: "my custom message"
+        )
       end
     end
   end
@@ -1128,8 +1222,10 @@ defmodule ArchTest.AssertionsTest do
       # Orders.Checkout -> Inventory.Repo (transitive to Inventory)
       # Orders.OrderService -> Repo.OrderRepo (transitive to Repo)
       subject = ModuleSet.new("FixtureApp.Orders.**")
-      object = ModuleSet.new("FixtureApp.Inventory.*")
-               |> ModuleSet.union(ModuleSet.new("FixtureApp.Repo.*"))
+
+      object =
+        ModuleSet.new("FixtureApp.Inventory.*")
+        |> ModuleSet.union(ModuleSet.new("FixtureApp.Repo.*"))
 
       assert_raise ExUnit.AssertionError, ~r/should_not_transitively_depend_on/, fn ->
         ArchTest.Assertions.should_not_transitively_depend_on(subject, object, graph: @graph)

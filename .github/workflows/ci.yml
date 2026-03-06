@@ -2,76 +2,70 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: [main]
   pull_request:
-    branches: ["main"]
+    branches: [main]
 
 jobs:
   test:
-    name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    name: Test (OTP ${{ matrix.otp }} / Elixir ${{ matrix.elixir }})
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - elixir: "1.17"
-            otp: "27"
-          - elixir: "1.16"
-            otp: "26"
-          - elixir: "1.15"
-            otp: "26"
+          - otp: "26.2"
+            elixir: "1.16"
+          - otp: "27.3"
+            elixir: "1.17"
+          - otp: "27.3"
+            elixir: "1.18"
+          - otp: "28.3"
+            elixir: "1.19"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@v1
         with:
-          elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
 
-      - name: Cache deps
+      - name: Restore deps cache
         uses: actions/cache@v4
         with:
-          path: deps
-          key: deps-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
-          restore-keys: deps-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
 
-      - name: Cache _build
-        uses: actions/cache@v4
-        with:
-          path: _build
-          key: build-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
-          restore-keys: build-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+      - run: mix test
 
-      - name: Install dependencies
-        run: mix deps.get
-
-      - name: Check formatting
-        run: mix format --check-formatted
-
-      - name: Compile (warnings as errors)
-        run: mix compile --warnings-as-errors
-
-      - name: Run tests
-        run: mix test
-
-  credo:
-    name: Credo
+  quality:
+    name: Quality checks
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.17"
-          otp-version: "27"
+          otp-version: "28.3"
+          elixir-version: "1.19"
 
-      - name: Install dependencies
-        run: mix deps.get
+      - name: Restore deps cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-28.3-1.19-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-28.3-1.19-
 
-      - name: Run Credo
-        run: mix credo --strict
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix credo --strict
