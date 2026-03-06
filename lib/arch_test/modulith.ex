@@ -232,6 +232,87 @@ defmodule ArchTest.Modulith do
     )
   end
 
+  @doc """
+  Asserts that every module under `namespace_pattern` belongs to a declared slice.
+
+  Any module that does not match any slice's namespace is a violation. This
+  prevents new modules from silently escaping slice coverage.
+
+  ## Options
+
+  - `:except` — list of glob patterns to exclude from the check
+  - `:graph` — pre-built dependency graph (useful for testing, avoids xref)
+
+  ## Example
+
+      define_slices(auth: "Vireale.Auth", feeds: "Vireale.Feeds")
+      |> all_modules_covered_by("Vireale.**",
+           except: ["Vireale.Application", "Vireale.Repo"])
+  """
+  @spec all_modules_covered_by(t(), String.t(), keyword()) :: :ok
+  def all_modules_covered_by(%__MODULE__{} = m, namespace_pattern, opts \\ []) do
+    graph =
+      case Keyword.get(opts, :graph) do
+        nil -> Collector.build_graph(m.app || :all)
+        g when is_map(g) -> g
+      end
+
+    except_patterns = Keyword.get(opts, :except, [])
+
+    candidates =
+      graph
+      |> Map.keys()
+      |> Enum.filter(fn mod ->
+        mod_str =
+          mod
+          |> Atom.to_string()
+          |> strip_elixir_prefix()
+
+        ArchTest.Pattern.matches?(namespace_pattern, mod_str)
+      end)
+      |> Enum.reject(fn mod ->
+        mod_str =
+          mod
+          |> Atom.to_string()
+          |> strip_elixir_prefix()
+
+        Enum.any?(except_patterns, &ArchTest.Pattern.matches?(&1, mod_str))
+      end)
+
+    covered =
+      m.slices
+      |> Enum.flat_map(fn {_slice_name, root_namespace} ->
+        slice_all_modules(root_namespace, graph)
+      end)
+      |> MapSet.new()
+
+    slice_names = m.slices |> Keyword.keys() |> Enum.map_join(", ", &":#{&1}")
+
+    violations =
+      candidates
+      |> Enum.reject(&MapSet.member?(covered, &1))
+      |> Enum.map(fn mod ->
+        %ArchTest.Violation{
+          type: :custom,
+          module: mod,
+          message:
+            "#{inspect(mod)} does not belong to any declared slice. " <>
+              "Add it to an existing slice or declare a new one with " <>
+              "`define_slices(..., new_slice: \"#{slice_root_hint(mod)}\")`."
+        }
+      end)
+
+    context =
+      "\n  rule:    all_modules_covered_by(\"#{namespace_pattern}\")" <>
+        "\n  slices:  [#{slice_names}]"
+
+    Assertions.assert_no_violations_public(
+      violations,
+      "modulith — all_modules_covered_by",
+      context
+    )
+  end
+
   # ------------------------------------------------------------------
   # Private helpers
   # ------------------------------------------------------------------
@@ -282,6 +363,16 @@ defmodule ArchTest.Modulith do
 
   defp strip_elixir_prefix("Elixir." <> rest), do: rest
   defp strip_elixir_prefix(str), do: str
+
+  # Suggests the top-level namespace for an uncovered module (first two segments).
+  defp slice_root_hint(mod) do
+    mod
+    |> Atom.to_string()
+    |> strip_elixir_prefix()
+    |> String.split(".")
+    |> Enum.take(2)
+    |> Enum.join(".")
+  end
 
   # Returns {slice_name, root_module} for the given module, or {nil, nil}
   defp find_slice(mod, slice_info) do

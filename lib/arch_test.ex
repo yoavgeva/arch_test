@@ -344,6 +344,12 @@ defmodule ArchTest do
   @spec should_not_depend_on_each_other(Modulith.t()) :: :ok
   defdelegate should_not_depend_on_each_other(modulith), to: Modulith
 
+  @doc "Asserts every module under namespace_pattern belongs to a declared slice."
+  defdelegate all_modules_covered_by(modulith, namespace_pattern), to: Modulith
+
+  @doc "Asserts every module under namespace_pattern belongs to a declared slice."
+  defdelegate all_modules_covered_by(modulith, namespace_pattern, opts), to: Modulith
+
   @doc """
   Enforces layer direction (each layer may only depend on layers below it).
   """

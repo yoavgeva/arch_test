@@ -217,6 +217,88 @@ defmodule ArchTest.ModulithTest do
     end
   end
 
+  describe "all_modules_covered_by/2,3" do
+    @covered_graph %{
+      FixtureApp.Orders => [],
+      FixtureApp.Orders.Checkout => [],
+      FixtureApp.Inventory => [],
+      FixtureApp.Inventory.Item => [],
+      FixtureApp.Application => []
+    }
+
+    test "passes when all modules belong to a slice" do
+      modulith =
+        Modulith.define_slices(
+          orders: "FixtureApp.Orders",
+          inventory: "FixtureApp.Inventory"
+        )
+
+      assert :ok =
+               Modulith.all_modules_covered_by(modulith, "FixtureApp.**",
+                 except: ["FixtureApp.Application"],
+                 graph: @covered_graph
+               )
+    end
+
+    test "fails when a module belongs to no slice" do
+      graph = Map.put(@covered_graph, FixtureApp.Orphan.Thing, [])
+
+      modulith =
+        Modulith.define_slices(
+          orders: "FixtureApp.Orders",
+          inventory: "FixtureApp.Inventory"
+        )
+
+      assert_raise ExUnit.AssertionError, ~r/FixtureApp.Orphan.Thing/, fn ->
+        Modulith.all_modules_covered_by(modulith, "FixtureApp.**",
+          except: ["FixtureApp.Application"],
+          graph: graph
+        )
+      end
+    end
+
+    test ":except option excludes modules from the check" do
+      # FixtureApp.Application would otherwise be uncovered
+      modulith =
+        Modulith.define_slices(
+          orders: "FixtureApp.Orders",
+          inventory: "FixtureApp.Inventory"
+        )
+
+      assert :ok =
+               Modulith.all_modules_covered_by(modulith, "FixtureApp.**",
+                 except: ["FixtureApp.Application"],
+                 graph: @covered_graph
+               )
+
+      # Without the :except it should fail
+      assert_raise ExUnit.AssertionError, ~r/FixtureApp.Application/, fn ->
+        Modulith.all_modules_covered_by(modulith, "FixtureApp.**",
+          graph: @covered_graph
+        )
+      end
+    end
+
+    test "violation message contains 'does not belong to any declared slice'" do
+      graph = Map.put(@covered_graph, FixtureApp.Unknown.Module, [])
+
+      modulith =
+        Modulith.define_slices(
+          orders: "FixtureApp.Orders",
+          inventory: "FixtureApp.Inventory"
+        )
+
+      assert_raise ExUnit.AssertionError,
+                   ~r/does not belong to any declared slice/,
+                   fn ->
+                     Modulith.all_modules_covered_by(modulith, "FixtureApp.**",
+                       except: ["FixtureApp.Application"],
+                       graph: graph
+                     )
+                   end
+    end
+  end
+
   # ------------------------------------------------------------------
   # Private helpers to test modulith logic without xref
   # ------------------------------------------------------------------
