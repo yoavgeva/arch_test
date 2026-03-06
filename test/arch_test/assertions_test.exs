@@ -36,7 +36,7 @@ defmodule ArchTest.AssertionsTest do
       object = ModuleSet.new("FixtureApp.Inventory.*")
 
       violations = check_should_not_depend_on(subject, object, @graph)
-      assert length(violations) >= 1
+      assert violations != []
 
       assert Enum.any?(violations, fn v ->
                v.caller == FixtureApp.Orders.Checkout and
@@ -60,7 +60,7 @@ defmodule ArchTest.AssertionsTest do
 
       violations = check_should_only_depend_on(subject, allowed, @graph)
       # Checkout → InventoryRepo, OrderService → OrderRepo are not in allowed
-      assert length(violations) >= 1
+      assert violations != []
     end
   end
 
@@ -106,7 +106,7 @@ defmodule ArchTest.AssertionsTest do
     test "detects module not in expected namespace" do
       subject = ModuleSet.new("FixtureApp.Inventory.*")
       violations = check_should_reside_under(subject, "FixtureApp.Inventory.Schemas.*", @graph)
-      assert length(violations) >= 1
+      assert violations != []
     end
   end
 
@@ -114,7 +114,7 @@ defmodule ArchTest.AssertionsTest do
     test "detects cycles in cycle modules" do
       subject = ModuleSet.new("FixtureApp.Domain.**")
       violations = check_should_be_free_of_cycles(subject, @graph)
-      assert length(violations) >= 1
+      assert violations != []
     end
 
     test "passes for modules with no cycles" do
@@ -131,7 +131,7 @@ defmodule ArchTest.AssertionsTest do
       object = ModuleSet.new("FixtureApp.Inventory.*")
 
       violations = check_should_not_transitively_depend_on(subject, object, @graph)
-      assert length(violations) >= 1
+      assert violations != []
     end
 
     test "passes when no transitive dep exists" do
@@ -169,7 +169,7 @@ defmodule ArchTest.AssertionsTest do
         |> ModuleSet.resolve(@graph)
         |> Enum.flat_map(fn mod ->
           deps = ArchTest.Collector.dependencies_of(@graph, mod)
-          if length(deps) > 0, do: [Violation.forbidden_dep(mod, hd(deps), "custom")], else: []
+          if deps != [], do: [Violation.forbidden_dep(mod, hd(deps), "custom")], else: []
         end)
 
       assert is_list(violations)

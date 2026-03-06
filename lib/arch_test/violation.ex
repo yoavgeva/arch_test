@@ -48,10 +48,9 @@ defmodule ArchTest.Violation do
 
     sections =
       grouped
-      |> Enum.map(fn {group_key, group_violations} ->
+      |> Enum.map_join("\n\n  #{String.duplicate("─", 60)}\n\n", fn {group_key, group_violations} ->
         format_group(group_key, group_violations)
       end)
-      |> Enum.join("\n\n  #{String.duplicate("─", 60)}\n\n")
 
     "\n\n#{sections}\n"
   end
@@ -147,27 +146,17 @@ defmodule ArchTest.Violation do
   end
 
   defp format_group(:ungrouped, violations) do
-    violations
-    |> Enum.map(&format_single/1)
-    |> Enum.join("\n\n")
+    Enum.map_join(violations, "\n\n", &format_single/1)
   end
 
   defp format_group(mod, violations) do
     header = "  #{inspect(mod)}"
-
-    items =
-      violations
-      |> Enum.map(&format_single/1)
-      |> Enum.join("\n")
-
+    items = Enum.map_join(violations, "\n", &format_single/1)
     "#{header}\n#{items}"
   end
 
   defp format_single(%__MODULE__{type: :cycle, path: path, message: msg}) when not is_nil(path) do
-    arrow_chain =
-      path
-      |> Enum.map(&inspect/1)
-      |> Enum.join(" → ")
+    arrow_chain = Enum.map_join(path, " → ", &inspect/1)
 
     # Show the cycle closing back to start
     closing = inspect(List.first(path))
@@ -185,10 +174,7 @@ defmodule ArchTest.Violation do
   defp format_single(%__MODULE__{caller: caller, callee: callee, path: path, message: msg})
        when not is_nil(caller) and not is_nil(callee) and not is_nil(path) do
     # Transitive dependency: show the full path
-    path_str =
-      path
-      |> Enum.map(&inspect/1)
-      |> Enum.join("\n    │    → ")
+    path_str = Enum.map_join(path, "\n    │    → ", &inspect/1)
 
     """
         ✗ depends on #{inspect(callee)}  [transitive]

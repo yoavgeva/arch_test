@@ -264,21 +264,22 @@ defmodule ArchTest.Conventions do
   defp get_abstract_forms(beam_path, mod) do
     # Try legacy :abstract_code chunk first
     case :beam_lib.chunks(beam_path, [:abstract_code]) do
-      {:ok, {_, [{:abstract_code, {_, forms}}]}} ->
-        forms
+      {:ok, {_, [{:abstract_code, {_, forms}}]}} -> forms
+      _ -> get_debug_info_forms(beam_path, mod)
+    end
+  end
+
+  defp get_debug_info_forms(beam_path, mod) do
+    # Fall back to modern :debug_info chunk (Elixir 1.14+ default)
+    case :beam_lib.chunks(beam_path, [:debug_info]) do
+      {:ok, {_, [{:debug_info, {:debug_info_v1, backend, data}}]}} ->
+        case backend.debug_info(:erlang_v1, mod, data, []) do
+          {:ok, forms} -> forms
+          _ -> []
+        end
 
       _ ->
-        # Fall back to modern :debug_info chunk (Elixir 1.14+ default)
-        case :beam_lib.chunks(beam_path, [:debug_info]) do
-          {:ok, {_, [{:debug_info, {:debug_info_v1, backend, data}}]}} ->
-            case backend.debug_info(:erlang_v1, mod, data, []) do
-              {:ok, forms} -> forms
-              _ -> []
-            end
-
-          _ ->
-            []
-        end
+        []
     end
   end
 
@@ -444,26 +445,22 @@ defmodule ArchTest.Conventions do
   defp contains_runtime_error_tuple?(_), do: false
 
   defp undocumented_public_functions(mod) do
-    try do
-      docs = Code.fetch_docs(mod)
+    case Code.fetch_docs(mod) do
+      {:docs_v1, _, _, _, _, _, fn_docs} ->
+        fn_docs
+        |> Enum.filter(fn
+          {{:function, _fun, _arity}, _, _, doc, _meta} ->
+            doc == :none or doc == :hidden or doc == %{}
 
-      case docs do
-        {:docs_v1, _, _, _, _, _, fn_docs} ->
-          fn_docs
-          |> Enum.filter(fn
-            {{:function, _fun, _arity}, _, _, doc, _meta} ->
-              doc == :none or doc == :hidden or doc == %{}
+          _ ->
+            false
+        end)
+        |> Enum.map(fn {{:function, fun, arity}, _, _, _, _} -> {fun, arity} end)
 
-            _ ->
-              false
-          end)
-          |> Enum.map(fn {{:function, fun, arity}, _, _, _, _} -> {fun, arity} end)
-
-        _ ->
-          []
-      end
-    rescue
-      _ -> []
+      _ ->
+        []
     end
+  rescue
+    _ -> []
   end
 end

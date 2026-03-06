@@ -177,20 +177,16 @@ defmodule ArchTest.Metrics do
 
   defp behaviour?(mod) do
     # A module is a behaviour if it defines callbacks via behaviour_info/1
-    try do
-      callbacks = mod.behaviour_info(:callbacks)
-      is_list(callbacks) and callbacks != []
-    rescue
-      _ -> false
-    end
+    callbacks = mod.behaviour_info(:callbacks)
+    is_list(callbacks) and callbacks != []
+  rescue
+    _ -> false
   end
 
   defp protocol?(mod) do
-    try do
-      function_exported?(mod, :__protocol__, 1) and mod.__protocol__(:functions) != []
-    rescue
-      _ -> false
-    end
+    function_exported?(mod, :__protocol__, 1) and mod.__protocol__(:functions) != []
+  rescue
+    _ -> false
   end
 
   defp average([]), do: 0.0

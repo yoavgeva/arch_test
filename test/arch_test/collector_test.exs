@@ -117,7 +117,7 @@ defmodule ArchTest.CollectorTest do
   describe "cycles/1" do
     test "detects direct cycle" do
       cycles = Collector.cycles(%{F => [G], G => [F]})
-      assert length(cycles) >= 1
+      assert cycles != []
       cycle_mods = List.flatten(cycles)
       assert F in cycle_mods
       assert G in cycle_mods
@@ -165,7 +165,7 @@ defmodule ArchTest.CollectorTest do
     test "self-reference is a cycle" do
       graph = %{A => [A]}
       cycles = Collector.cycles(graph)
-      assert length(cycles) >= 1
+      assert cycles != []
     end
 
     test "normalized cycles have no trailing duplicate" do

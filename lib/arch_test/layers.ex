@@ -202,55 +202,67 @@ defmodule ArchTest.Layers do
     Enum.flat_map(rules, fn {layer_name, rule_type, target_layers} ->
       pattern = Keyword.fetch!(layers, layer_name)
       layer_modules = ModuleSet.new(pattern) |> ModuleSet.resolve(graph)
-
-      case rule_type do
-        :may_only_depend_on ->
-          allowed_mods =
-            target_layers
-            |> Enum.flat_map(fn l ->
-              p = Keyword.fetch!(layers, l)
-              ModuleSet.new(p) |> ModuleSet.resolve(graph)
-            end)
-            |> MapSet.new()
-
-          for mod <- layer_modules,
-              dep <- Collector.dependencies_of(graph, mod),
-              Map.has_key?(graph, dep),
-              not MapSet.member?(allowed_mods, dep) do
-            dep_layer = find_layer(dep, layers, graph)
-
-            allowed_str = target_layers |> Enum.map_join(", ", &":#{&1}")
-
-            Violation.forbidden_dep(
-              mod,
-              dep,
-              "layer :#{layer_name} may only depend on [#{allowed_str}] " <>
-                "but depends on :#{dep_layer}."
-            )
-          end
-
-        :may_not_depend_on ->
-          forbidden_mods =
-            target_layers
-            |> Enum.flat_map(fn l ->
-              p = Keyword.fetch!(layers, l)
-              ModuleSet.new(p) |> ModuleSet.resolve(graph)
-            end)
-            |> MapSet.new()
-
-          for mod <- layer_modules,
-              dep <- Collector.dependencies_of(graph, mod),
-              MapSet.member?(forbidden_mods, dep) do
-            dep_layer = find_layer(dep, layers, graph)
-
-            Violation.forbidden_dep(
-              mod,
-              dep,
-              "layer :#{layer_name} must not depend on :#{dep_layer} (explicitly forbidden)."
-            )
-          end
-      end
+      evaluate_custom_rule(rule_type, layer_name, layer_modules, target_layers, layers, graph)
     end)
+  end
+
+  defp evaluate_custom_rule(
+         :may_only_depend_on,
+         layer_name,
+         layer_modules,
+         target_layers,
+         layers,
+         graph
+       ) do
+    allowed_mods =
+      target_layers
+      |> Enum.flat_map(fn l ->
+        ModuleSet.new(Keyword.fetch!(layers, l)) |> ModuleSet.resolve(graph)
+      end)
+      |> MapSet.new()
+
+    allowed_str = Enum.map_join(target_layers, ", ", &":#{&1}")
+
+    for mod <- layer_modules,
+        dep <- Collector.dependencies_of(graph, mod),
+        Map.has_key?(graph, dep),
+        not MapSet.member?(allowed_mods, dep) do
+      dep_layer = find_layer(dep, layers, graph)
+
+      Violation.forbidden_dep(
+        mod,
+        dep,
+        "layer :#{layer_name} may only depend on [#{allowed_str}] but depends on :#{dep_layer}."
+      )
+    end
+  end
+
+  defp evaluate_custom_rule(
+         :may_not_depend_on,
+         layer_name,
+         layer_modules,
+         target_layers,
+         layers,
+         graph
+       ) do
+    forbidden_mods =
+      target_layers
+      |> Enum.flat_map(fn l ->
+        ModuleSet.new(Keyword.fetch!(layers, l)) |> ModuleSet.resolve(graph)
+      end)
+      |> MapSet.new()
+
+    for mod <- layer_modules,
+        dep <- Collector.dependencies_of(graph, mod),
+        MapSet.member?(forbidden_mods, dep) do
+      dep_layer = find_layer(dep, layers, graph)
+
+      Violation.forbidden_dep(
+        mod,
+        dep,
+        "layer :#{layer_name} must not depend on :#{dep_layer} (explicitly forbidden)."
+      )
+    end
   end
 
   defp find_layer(mod, layers, graph) do

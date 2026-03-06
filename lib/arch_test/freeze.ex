@@ -95,13 +95,11 @@ defmodule ArchTest.Freeze do
 
   # Runs the assertion function and captures violations instead of raising.
   defp collect_violations(assertion_fn) do
-    try do
-      assertion_fn.()
-      []
-    rescue
-      e in ExUnit.AssertionError ->
-        extract_violation_keys(e.message)
-    end
+    assertion_fn.()
+    []
+  rescue
+    e in ExUnit.AssertionError ->
+      extract_violation_keys(e.message)
   end
 
   # Extracts sortable violation keys from an AssertionError message.
@@ -144,11 +142,7 @@ defmodule ArchTest.Freeze do
   end
 
   defp format_new_violations(violation_keys) do
-    lines =
-      violation_keys
-      |> Enum.map(fn v -> "    " <> v end)
-      |> Enum.join("\n")
-
+    lines = Enum.map_join(violation_keys, "\n", fn v -> "    " <> v end)
     "\n\n#{lines}\n"
   end
 end

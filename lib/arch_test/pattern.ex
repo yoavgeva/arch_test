@@ -120,66 +120,48 @@ defmodule ArchTest.Pattern do
     segments
     |> Enum.with_index()
     |> Enum.reduce({[], :after_normal}, fn {seg, idx}, {parts, mode} ->
-      is_last = idx == total - 1
-
-      case {seg, mode, is_last} do
-        # Sole segment is **
-        {"**", :after_normal, true} when idx == 0 ->
-          {["[^.]+(\\.[^.]+)*" | parts], :after_double_star}
-
-        # ** at start (first segment, more to follow)
-        {"**", :after_normal, false} when idx == 0 ->
-          # Match zero or more "segment." prefixes.
-          # Since the NEXT segment will NOT add a leading dot (we set mode),
-          # the "(?:[^.]+\.)*" already handles the separator.
-          {["(?:[^.]+\\.)*" | parts], :after_double_star}
-
-        # ** at end (after normal segment)
-        {"**", :after_normal, true} ->
-          # Must match at least 1 more segment: "." + segment + optional more
-          {["\\.(?:[^.]+\\.)*[^.]+" | parts], :after_double_star}
-
-        # ** in middle (after normal segment)
-        {"**", :after_normal, false} ->
-          # Emit: "." separator + then zero-or-more "segment." groups.
-          # The trailing dot of the last group flows into the next segment directly.
-          # Result: "\.(?:[^.]+\.)*" — mandatory leading dot, zero or more trailing groups.
-          {["\\.(?:[^.]+\\.)*" | parts], :after_double_star}
-
-        # ** at end after a previous **
-        {"**", :after_double_star, true} ->
-          # Consecutive ** at end: current regex already has zero-or-more "seg." groups.
-          # We need to ensure at least one complete segment is matched.
-          # Replace the trailing \.(?:[^.]+\.)* with \.(?:[^.]+\.)*[^.]+
-          # by emitting the missing final non-dot-containing segment.
-          {["[^.]+" | parts], :after_double_star}
-
-        # ** in middle after a previous **
-        {"**", :after_double_star, false} ->
-          # Two consecutive ** in middle collapse — no extra emission needed
-          {parts, :after_double_star}
-
-        # Normal segment at start (no dot prefix)
-        {seg, :after_normal, _} when idx == 0 ->
-          {[segment_to_regex(seg) | parts], :after_normal}
-
-        # Normal segment after ** at start: ** emitted "(?:[^.]+\.)*"
-        # which already includes the optional trailing dot, so no extra dot needed.
-        # BUT: the regex "(?:[^.]+\.)*" matches "A." "A.B." etc., and we need
-        # the next segment to follow directly. The "?" already handles zero matches.
-        # So: no extra dot for the first segment after a leading **.
-        {seg, :after_double_star, _} ->
-          {[segment_to_regex(seg) | parts], :after_normal}
-
-        # Normal segment after normal segment: add dot separator
-        {seg, :after_normal, _} ->
-          {[segment_to_regex(seg), "\\." | parts], :after_normal}
-      end
+      reduce_segment(seg, idx, idx == total - 1, parts, mode)
     end)
     |> elem(0)
     |> Enum.reverse()
     |> Enum.join()
   end
+
+  # Sole ** (only segment)
+  defp reduce_segment("**", 0, true, parts, :after_normal),
+    do: {["[^.]+(\\.[^.]+)*" | parts], :after_double_star}
+
+  # ** at start, more segments follow
+  defp reduce_segment("**", 0, false, parts, :after_normal),
+    do: {["(?:[^.]+\\.)*" | parts], :after_double_star}
+
+  # ** at end after a normal segment
+  defp reduce_segment("**", _idx, true, parts, :after_normal),
+    do: {["\\.(?:[^.]+\\.)*[^.]+" | parts], :after_double_star}
+
+  # ** in middle after a normal segment
+  defp reduce_segment("**", _idx, false, parts, :after_normal),
+    do: {["\\.(?:[^.]+\\.)*" | parts], :after_double_star}
+
+  # ** at end after a previous **
+  defp reduce_segment("**", _idx, true, parts, :after_double_star),
+    do: {["[^.]+" | parts], :after_double_star}
+
+  # ** in middle after a previous ** — collapse
+  defp reduce_segment("**", _idx, false, parts, :after_double_star),
+    do: {parts, :after_double_star}
+
+  # Normal segment at start
+  defp reduce_segment(seg, 0, _last, parts, :after_normal),
+    do: {[segment_to_regex(seg) | parts], :after_normal}
+
+  # Normal segment after **
+  defp reduce_segment(seg, _idx, _last, parts, :after_double_star),
+    do: {[segment_to_regex(seg) | parts], :after_normal}
+
+  # Normal segment after normal segment
+  defp reduce_segment(seg, _idx, _last, parts, :after_normal),
+    do: {[segment_to_regex(seg), "\\." | parts], :after_normal}
 
   # Converts a single (non-`**`) segment to a regex fragment.
   defp segment_to_regex(seg) do

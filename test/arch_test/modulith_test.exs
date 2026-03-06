@@ -93,7 +93,7 @@ defmodule ArchTest.ModulithTest do
         )
 
       cycles = check_slice_cycles(modulith, cyclic_graph)
-      assert length(cycles) >= 1
+      assert cycles != []
     end
 
     test "passes with no slice cycles" do
@@ -293,8 +293,7 @@ defmodule ArchTest.ModulithTest do
             {dep_slice, _root} = find_slice(dep, slice_info)
             dep_slice
           end)
-          |> Enum.reject(&is_nil/1)
-          |> Enum.reject(&(&1 == slice_name))
+          |> Enum.reject(&(is_nil(&1) or &1 == slice_name))
           |> Enum.uniq()
 
         Map.put(acc, slice_name, dep_slices)

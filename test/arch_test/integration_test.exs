@@ -198,7 +198,7 @@ defmodule ArchTest.IntegrationTest do
         |> Map.new()
 
       cycles = ArchTest.Collector.cycles(domain_graph)
-      assert length(cycles) >= 1
+      assert cycles != []
       cycle_mods = List.flatten(cycles)
       assert FixtureApp.Domain.CycleA in cycle_mods
       assert FixtureApp.Domain.CycleB in cycle_mods
@@ -1097,8 +1097,7 @@ defmodule ArchTest.IntegrationTest do
             {dep_slice, _root} = find_slice(dep, slice_info)
             dep_slice
           end)
-          |> Enum.reject(&is_nil/1)
-          |> Enum.reject(&(&1 == slice_name))
+          |> Enum.reject(&(is_nil(&1) or &1 == slice_name))
           |> Enum.uniq()
 
         Map.put(acc, slice_name, dep_slices)
@@ -1114,16 +1113,14 @@ defmodule ArchTest.IntegrationTest do
     ArchTest.Assertions.assert_no_violations_public(violations, "should_be_free_of_cycles")
   end
 
+  defp strip_elixir_prefix("Elixir." <> rest), do: rest
+  defp strip_elixir_prefix(s), do: s
+
   defp slice_all_modules(root_namespace, graph) do
     children_pattern = "#{root_namespace}.**"
 
     Enum.filter(Map.keys(graph), fn mod ->
-      mod_str =
-        mod
-        |> Atom.to_string()
-        |> then(fn s ->
-          if String.starts_with?(s, "Elixir."), do: String.slice(s, 7..-1//1), else: s
-        end)
+      mod_str = mod |> Atom.to_string() |> strip_elixir_prefix()
 
       ArchTest.Pattern.matches?(children_pattern, mod_str) or
         ArchTest.Pattern.matches?(root_namespace, mod_str)

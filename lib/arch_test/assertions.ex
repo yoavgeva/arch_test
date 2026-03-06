@@ -794,7 +794,7 @@ defmodule ArchTest.Assertions do
           attrs = get_module_attributes(mod),
           not Keyword.has_key?(attrs, attr_key) do
         present =
-          attrs |> Keyword.keys() |> Enum.uniq() |> Enum.map(&inspect/1) |> Enum.join(", ")
+          attrs |> Keyword.keys() |> Enum.uniq() |> Enum.map_join(", ", &inspect/1)
 
         Violation.naming(
           mod,
@@ -1005,7 +1005,7 @@ defmodule ArchTest.Assertions do
   # Warn when the subject resolved to zero modules — almost certainly a
   # wrong pattern, which would silently pass every rule.
   defp warn_if_empty([], subject, rule) do
-    patterns = subject.include_patterns |> Enum.map(&inspect/1) |> Enum.join(", ")
+    patterns = Enum.map_join(subject.include_patterns, ", ", &inspect/1)
 
     require Logger
 
@@ -1019,14 +1019,12 @@ defmodule ArchTest.Assertions do
   defp warn_if_empty(_mods, _subject, _rule), do: :ok
 
   defp implements_behaviour?(mod, behaviour) do
-    try do
-      mod.__info__(:attributes)
-      |> Keyword.get_values(:behaviour)
-      |> List.flatten()
-      |> Enum.member?(behaviour)
-    rescue
-      _ -> false
-    end
+    mod.__info__(:attributes)
+    |> Keyword.get_values(:behaviour)
+    |> List.flatten()
+    |> Enum.member?(behaviour)
+  rescue
+    _ -> false
   end
 
   defp implements_protocol?(mod, protocol) do
@@ -1035,42 +1033,34 @@ defmodule ArchTest.Assertions do
   end
 
   defp get_public_functions(mod) do
-    try do
-      mod.__info__(:functions)
-    rescue
-      _ -> []
-    end
+    mod.__info__(:functions)
+  rescue
+    _ -> []
   end
 
   defp get_module_attributes(mod) do
-    try do
-      mod.__info__(:attributes)
-    rescue
-      _ -> []
-    end
+    mod.__info__(:attributes)
+  rescue
+    _ -> []
   end
 
   defp module_uses?(mod, used_module) do
-    try do
-      attrs = mod.__info__(:attributes)
-
-      attrs
-      |> Keyword.values()
-      |> List.flatten()
-      |> Enum.member?(used_module)
-    rescue
-      _ -> false
-    end
+    mod.__info__(:attributes)
+    |> Keyword.values()
+    |> List.flatten()
+    |> Enum.member?(used_module)
+  rescue
+    _ -> false
   end
 
   # Human-readable description of the patterns in a ModuleSet.
   defp format_patterns(%ModuleSet{include_patterns: patterns, exclude_patterns: []}) do
-    patterns |> Enum.map(&"\"#{&1}\"") |> Enum.join(" | ")
+    Enum.map_join(patterns, " | ", &"\"#{&1}\"")
   end
 
   defp format_patterns(%ModuleSet{include_patterns: patterns, exclude_patterns: excludes}) do
-    inc = patterns |> Enum.map(&"\"#{&1}\"") |> Enum.join(" | ")
-    exc = excludes |> Enum.map(&"\"#{&1}\"") |> Enum.join(", ")
+    inc = Enum.map_join(patterns, " | ", &"\"#{&1}\"")
+    exc = Enum.map_join(excludes, ", ", &"\"#{&1}\"")
     "#{inc} (excluding #{exc})"
   end
 

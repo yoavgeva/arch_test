@@ -40,7 +40,7 @@ defmodule ArchTest do
   - `ArchTest.Pattern` — glob pattern matching
   """
 
-  alias ArchTest.{Assertions, ModuleSet, Modulith, Layers}
+  alias ArchTest.{Assertions, Layers, ModuleSet, Modulith}
 
   @doc false
   defmacro __using__(opts \\ []) do

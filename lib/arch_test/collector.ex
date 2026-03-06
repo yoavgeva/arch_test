@@ -35,7 +35,11 @@ defmodule ArchTest.Collector do
     cache_key = {@cache_key, {:path, ebin_path}}
     force = Keyword.get(opts, :force, false)
 
-    if not force do
+    if force do
+      graph = do_build_graph_from_paths([ebin_path])
+      :persistent_term.put(cache_key, graph)
+      graph
+    else
       case :persistent_term.get(cache_key, :not_found) do
         :not_found ->
           graph = do_build_graph_from_paths([ebin_path])
@@ -45,10 +49,6 @@ defmodule ArchTest.Collector do
         graph ->
           graph
       end
-    else
-      graph = do_build_graph_from_paths([ebin_path])
-      :persistent_term.put(cache_key, graph)
-      graph
     end
   end
 
@@ -68,13 +68,13 @@ defmodule ArchTest.Collector do
     cache_key = {@cache_key, app}
     force = Keyword.get(opts, :force, false)
 
-    if not force do
+    if force do
+      build_and_cache(app, cache_key)
+    else
       case :persistent_term.get(cache_key, :not_found) do
         :not_found -> build_and_cache(app, cache_key)
         graph -> graph
       end
-    else
-      build_and_cache(app, cache_key)
     end
   end
 
@@ -174,22 +174,22 @@ defmodule ArchTest.Collector do
   end
 
   defp all_modules_from_beam(beam_paths) do
-    Enum.flat_map(beam_paths, fn path ->
-      case File.ls(path) do
-        {:ok, files} ->
-          files
-          |> Enum.filter(&String.ends_with?(&1, ".beam"))
-          |> Enum.map(fn file ->
-            file
-            |> String.replace_suffix(".beam", "")
-            |> String.to_atom()
-          end)
-          |> Enum.map(&normalize_module/1)
+    Enum.flat_map(beam_paths, &modules_from_beam_path/1)
+  end
 
-        {:error, _} ->
-          []
-      end
-    end)
+  defp modules_from_beam_path(path) do
+    case File.ls(path) do
+      {:ok, files} ->
+        files
+        |> Enum.filter(&String.ends_with?(&1, ".beam"))
+        |> Enum.map(fn file ->
+          file |> String.replace_suffix(".beam", "") |> String.to_atom()
+        end)
+        |> Enum.map(&normalize_module/1)
+
+      {:error, _} ->
+        []
+    end
   end
 
   defp beam_paths_for(:all) do
@@ -282,21 +282,25 @@ defmodule ArchTest.Collector do
         {[], global_visited}
       end
     else
-      if MapSet.member?(global_visited, node) do
-        {[], global_visited}
-      else
-        new_path = path ++ [node]
-        new_on_stack = MapSet.put(on_stack, node)
-        deps = Map.get(graph, node, [])
+      dfs_unvisited(graph, node, path, on_stack, global_visited)
+    end
+  end
 
-        {cycles, visited} =
-          Enum.reduce(deps, {[], global_visited}, fn dep, {found, vis} ->
-            {new_found, new_vis} = dfs_cycles(graph, dep, new_path, new_on_stack, vis)
-            {found ++ new_found, new_vis}
-          end)
+  defp dfs_unvisited(graph, node, path, on_stack, global_visited) do
+    if MapSet.member?(global_visited, node) do
+      {[], global_visited}
+    else
+      new_path = path ++ [node]
+      new_on_stack = MapSet.put(on_stack, node)
+      deps = Map.get(graph, node, [])
 
-        {cycles, MapSet.put(visited, node)}
-      end
+      {cycles, visited} =
+        Enum.reduce(deps, {[], global_visited}, fn dep, {found, vis} ->
+          {new_found, new_vis} = dfs_cycles(graph, dep, new_path, new_on_stack, vis)
+          {found ++ new_found, new_vis}
+        end)
+
+      {cycles, MapSet.put(visited, node)}
     end
   end
 
