@@ -3,6 +3,17 @@ defmodule Mix.Tasks.ArchTest.Gen.Conventions do
 
   @shortdoc "Generate code convention checks (no IO.puts, dbg, bare raise, etc.)"
 
+  @moduledoc """
+  Generates a code conventions architecture test file.
+
+  ## Usage
+
+      mix arch_test.gen.conventions
+
+  Creates `test/arch/conventions_arch_test.exs` checking that production
+  modules contain no `IO.puts`, `dbg`, or bare `raise` string calls.
+  """
+
   @impl Igniter.Mix.Task
   def igniter(igniter) do
     app = Igniter.Project.Application.app_name(igniter)

@@ -10,6 +10,7 @@ defmodule FixtureApp.DebugHelpers do
   end
 
   def inspect_item(item) do
+    # credo:disable-for-next-line Credo.Check.Warning.Dbg
     dbg(item)
     item
   end

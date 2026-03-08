@@ -3,6 +3,18 @@ defmodule Mix.Tasks.ArchTest.Gen.Phoenix do
 
   @shortdoc "Generate an opinionated Phoenix architecture test (layers + conventions)"
 
+  @moduledoc """
+  Generates an opinionated Phoenix architecture test file.
+
+  ## Usage
+
+      mix arch_test.gen.phoenix
+
+  Creates `test/arch/phoenix_arch_test.exs` combining layer direction
+  (web → context → repo), context isolation from the web layer, cycle
+  detection, naming rules, and code convention checks.
+  """
+
   @impl Igniter.Mix.Task
   def igniter(igniter) do
     app = Igniter.Project.Application.app_name(igniter)

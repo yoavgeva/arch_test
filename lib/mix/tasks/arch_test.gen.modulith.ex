@@ -3,6 +3,17 @@ defmodule Mix.Tasks.ArchTest.Gen.Modulith do
 
   @shortdoc "Generate a modulith bounded-context isolation test"
 
+  @moduledoc """
+  Generates a modulith architecture test file.
+
+  ## Usage
+
+      mix arch_test.gen.modulith
+
+  Creates `test/arch/modulith_arch_test.exs` with slice isolation and
+  cycle-detection tests. Edit the generated slices to match your contexts.
+  """
+
   @impl Igniter.Mix.Task
   def igniter(igniter) do
     app = Igniter.Project.Application.app_name(igniter)

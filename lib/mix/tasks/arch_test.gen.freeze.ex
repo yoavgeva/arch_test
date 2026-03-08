@@ -3,6 +3,19 @@ defmodule Mix.Tasks.ArchTest.Gen.Freeze do
 
   @shortdoc "Generate a freeze baseline test for gradual adoption"
 
+  @moduledoc """
+  Generates a freeze baseline architecture test file.
+
+  ## Usage
+
+      mix arch_test.gen.freeze
+
+  Creates `test/arch/freeze_arch_test.exs`. Run with
+  `ARCH_TEST_UPDATE_FREEZE=true mix test` to establish the baseline, then
+  commit the generated `test/arch_test_violations/` files. Only new violations
+  introduced after the baseline will cause failures.
+  """
+
   @impl Igniter.Mix.Task
   def igniter(igniter) do
     app = Igniter.Project.Application.app_name(igniter)

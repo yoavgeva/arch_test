@@ -3,6 +3,17 @@ defmodule Mix.Tasks.ArchTest.Gen.Onion do
 
   @shortdoc "Generate an onion/hexagonal architecture test"
 
+  @moduledoc """
+  Generates an onion / hexagonal architecture test file.
+
+  ## Usage
+
+      mix arch_test.gen.onion
+
+  Creates `test/arch/onion_arch_test.exs` enforcing that dependencies point
+  inward only: domain → application → adapters → web.
+  """
+
   @impl Igniter.Mix.Task
   def igniter(igniter) do
     app = Igniter.Project.Application.app_name(igniter)

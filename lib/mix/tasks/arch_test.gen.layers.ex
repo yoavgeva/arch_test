@@ -3,6 +3,17 @@ defmodule Mix.Tasks.ArchTest.Gen.Layers do
 
   @shortdoc "Generate a layered architecture test (web → context → repo)"
 
+  @moduledoc """
+  Generates a classic layered architecture test file.
+
+  ## Usage
+
+      mix arch_test.gen.layers
+
+  Creates `test/arch/layers_arch_test.exs` enforcing that web may only depend
+  on context, and context may only depend on repo — never upward.
+  """
+
   @impl Igniter.Mix.Task
   def igniter(igniter) do
     app = Igniter.Project.Application.app_name(igniter)

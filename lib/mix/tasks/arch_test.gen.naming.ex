@@ -3,6 +3,17 @@ defmodule Mix.Tasks.ArchTest.Gen.Naming do
 
   @shortdoc "Generate naming convention rules"
 
+  @moduledoc """
+  Generates a naming convention architecture test file.
+
+  ## Usage
+
+      mix arch_test.gen.naming
+
+  Creates `test/arch/naming_arch_test.exs` banning `*Manager` and `*God`
+  module names and enforcing that Ecto schemas live under a `Schemas` namespace.
+  """
+
   @impl Igniter.Mix.Task
   def igniter(igniter) do
     app = Igniter.Project.Application.app_name(igniter)
