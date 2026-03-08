@@ -1,7 +1,7 @@
 defmodule ArchTest.MixProject do
   use Mix.Project
 
-  @version "0.1.2"
+  @version "0.2.0"
   @source_url "https://github.com/yoavgeva/arch_test"
 
   def project do
@@ -40,7 +40,8 @@ defmodule ArchTest.MixProject do
   defp deps do
     [
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:igniter, "~> 0.7", only: [:dev, :test], optional: true, runtime: false}
     ]
   end
 

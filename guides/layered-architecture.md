@@ -4,6 +4,8 @@ ArchTest ships two built-in patterns for layered architectures: **classic layers
 
 Both are defined by naming the layers and calling an enforcement function. The library does the rest.
 
+Further reading: [N-tier architecture (Wikipedia)](https://en.wikipedia.org/wiki/Multitier_architecture) · [Onion Architecture (Jeffrey Palermo)](https://jeffreypalermo.com/2008/07/the-onion-architecture-part-1/) · [Hexagonal / Ports & Adapters (Alistair Cockburn)](https://alistair.cockburn.us/hexagonal-architecture/)
+
 ---
 
 ## Classic layered architecture

@@ -54,9 +54,32 @@ For most teams, **ArchTest alone is enough**. You get bounded-context isolation,
 # mix.exs
 def deps do
   [
-    {:arch_test, "~> 0.1", only: :test, runtime: false}
+    {:arch_test, "~> 0.2", only: :test, runtime: false}
   ]
 end
+```
+
+---
+
+## Igniter tasks
+
+If you use [Igniter](https://hex.pm/packages/igniter), ArchTest provides generators for common setup patterns:
+
+| Command | What it generates |
+|---------|-------------------|
+| `mix igniter.install arch_test` | Basic arch test file with a cycle check |
+| `mix arch_test.gen.phoenix` | Opinionated Phoenix setup — layers + naming + conventions ([Phoenix Contexts guide](https://hexdocs.pm/phoenix/contexts.html)) |
+| `mix arch_test.gen.layers` | [Classic web → context → repo layers](guides/layered-architecture.md) ([N-tier architecture](https://en.wikipedia.org/wiki/Multitier_architecture)) |
+| `mix arch_test.gen.onion` | [Onion / hexagonal rings](guides/layered-architecture.md#onion--hexagonal-architecture) ([Onion Architecture](https://jeffreypalermo.com/2008/07/the-onion-architecture-part-1/) · [Hexagonal / Ports & Adapters](https://alistair.cockburn.us/hexagonal-architecture/)) |
+| `mix arch_test.gen.modulith` | [Bounded-context slice isolation](guides/modulith-rules.md) ([Modular Monolith Primer](https://www.kamilgrzybek.com/blog/posts/modular-monolith-primer)) |
+| `mix arch_test.gen.naming` | Naming rules — no Managers, schema namespace placement |
+| `mix arch_test.gen.conventions` | Code hygiene — no `IO.puts`, `dbg`, bare `raise` |
+| `mix arch_test.gen.freeze` | [Freeze baseline for gradual adoption](guides/freezing.md) |
+
+Add Igniter as a dev dependency to use these:
+
+```elixir
+{:igniter, "~> 0.7", only: [:dev, :test], runtime: false}
 ```
 
 ---

@@ -274,3 +274,18 @@ use ArchTest, app: :my_app
 # config/test.exs
 config :arch_test, freeze_store: "test/arch_violations"
 ```
+
+## Igniter Generators
+
+Add `{:igniter, "~> 0.7", only: [:dev, :test], runtime: false}`, then:
+
+| Command | Guide | Further reading |
+|---------|-------|-----------------|
+| `mix igniter.install arch_test` | Basic cycle-check file | |
+| `mix arch_test.gen.phoenix` | Layers + naming + conventions combined | [Phoenix Contexts](https://hexdocs.pm/phoenix/contexts.html) |
+| `mix arch_test.gen.layers` | [Layered Architecture](layered-architecture.md) | [N-tier architecture](https://en.wikipedia.org/wiki/Multitier_architecture) |
+| `mix arch_test.gen.onion` | [Layered Architecture — Onion](layered-architecture.md#onion--hexagonal-architecture) | [Onion Architecture](https://jeffreypalermo.com/2008/07/the-onion-architecture-part-1/) · [Hexagonal / Ports & Adapters](https://alistair.cockburn.us/hexagonal-architecture/) |
+| `mix arch_test.gen.modulith` | [Modulith / Bounded Contexts](modulith-rules.md) | [Modular Monolith Primer](https://www.kamilgrzybek.com/blog/posts/modular-monolith-primer) |
+| `mix arch_test.gen.naming` | Naming Rules section above | |
+| `mix arch_test.gen.conventions` | Code Conventions section above | |
+| `mix arch_test.gen.freeze` | [Gradual Adoption — Freeze](freezing.md) | |

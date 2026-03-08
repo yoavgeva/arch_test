@@ -28,10 +28,10 @@ defmodule ArchTest.IntegrationTest do
   # ---------------------------------------------------------------------------
 
   describe "Collector.build_graph_from_path/1" do
-    test "loads all 21 fixture modules" do
+    test "loads all 23 fixture modules" do
       g = graph()
       mods = ArchTest.Collector.all_modules(g)
-      assert length(mods) == 21
+      assert length(mods) == 23
     end
 
     test "every FixtureApp module is present as a key" do
@@ -246,8 +246,8 @@ defmodule ArchTest.IntegrationTest do
       ms = ArchTest.ModuleSet.new("FixtureApp.**")
       result = ArchTest.ModuleSet.resolve(ms, g)
       # FixtureApp.** matches all descendants but NOT FixtureApp root itself
-      # (** requires at least one dot-segment). 20 = 21 total - 1 root.
-      assert length(result) == 20
+      # (** requires at least one dot-segment). 22 = 23 total - 1 root.
+      assert length(result) == 22
     end
 
     test "ending pattern matches correctly" do
@@ -842,11 +842,11 @@ defmodule ArchTest.IntegrationTest do
       end)
     end
 
-    test "martin/1 returns metrics for all FixtureApp descendants (20 — root excluded by **)" do
+    test "martin/1 returns metrics for all FixtureApp descendants (22 — root excluded by **)" do
       g = graph()
       all_metrics = ArchTest.Metrics.martin("FixtureApp.**", graph: g)
-      # FixtureApp.** matches 20 modules (excludes FixtureApp root)
-      assert map_size(all_metrics) == 20
+      # FixtureApp.** matches 22 modules (excludes FixtureApp root)
+      assert map_size(all_metrics) == 22
     end
 
     test "distance is between 0 and 1" do
@@ -915,16 +915,16 @@ defmodule ArchTest.IntegrationTest do
       g = graph()
       ms = ArchTest.modules_matching("FixtureApp.Orders.*")
       result = ArchTest.ModuleSet.resolve(ms, g)
-      assert length(result) == 3
+      assert length(result) == 4
       assert FixtureApp.Orders.Checkout in result
     end
 
-    test "all_modules resolves all 21 fixture modules" do
+    test "all_modules resolves all 23 fixture modules" do
       g = graph()
       ms = ArchTest.all_modules()
       result = ArchTest.ModuleSet.resolve(ms, g)
       # all_modules() uses "**" which matches single-segment names too
-      assert length(result) == 21
+      assert length(result) == 23
     end
 
     test "modules_in resolves direct children" do

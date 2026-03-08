@@ -1,6 +1,27 @@
 defmodule ArchTestTest do
   use ExUnit.Case, async: true
 
+  @version Mix.Project.config()[:version]
+
+  describe "docs version consistency" do
+    test "README installation snippet matches mix.exs version" do
+      readme = File.read!(Path.expand("../README.md", __DIR__))
+      assert readme =~ ~s({:arch_test, "~> #{minor_version(@version)}"),
+             "README dep snippet is out of sync with mix.exs version #{@version}"
+    end
+
+    test "getting-started guide matches mix.exs version" do
+      guide = File.read!(Path.expand("../guides/getting-started.md", __DIR__))
+      assert guide =~ ~s({:arch_test, "~> #{minor_version(@version)}"),
+             "guides/getting-started.md dep snippet is out of sync with mix.exs version #{@version}"
+    end
+  end
+
+  defp minor_version(version) do
+    [major, minor | _] = String.split(version, ".")
+    "#{major}.#{minor}"
+  end
+
   describe "use ArchTest" do
     test "exports DSL functions" do
       Code.ensure_loaded!(ArchTest)

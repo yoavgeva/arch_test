@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-08
+
+### Added
+
+- **Igniter Mix tasks** — 8 generators for common architecture patterns:
+  - `mix igniter.install arch_test` / `mix arch_test.install` — basic arch test file with cycle check
+  - `mix arch_test.gen.phoenix` — opinionated Phoenix setup (layers + naming + conventions)
+  - `mix arch_test.gen.layers` — classic web → context → repo layered architecture
+  - `mix arch_test.gen.onion` — onion / hexagonal architecture (domain → application → adapters → web)
+  - `mix arch_test.gen.modulith` — bounded-context slice isolation
+  - `mix arch_test.gen.naming` — naming convention rules (no Managers, schema placement)
+  - `mix arch_test.gen.conventions` — code hygiene checks (no `IO.puts`, `dbg`, bare `raise`)
+  - `mix arch_test.gen.freeze` — freeze baseline for gradual adoption
+- **Optional Igniter dependency** — `{:igniter, "~> 0.7", only: [:dev, :test], optional: true, runtime: false}`
+
 ## [0.1.2] - 2026-03-07
 
 ### Added

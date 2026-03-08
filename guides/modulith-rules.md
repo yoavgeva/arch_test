@@ -2,6 +2,8 @@
 
 A **modulith** is a monolith with well-defined internal boundaries — bounded contexts that own their data and expose a clean public API, but run in the same process and share the same database. ArchTest's modulith support enforces those boundaries at compile time so they can't erode silently.
 
+Further reading: [Modular Monolith: A Primer (Kamil Grzybek)](https://www.kamilgrzybek.com/blog/posts/modular-monolith-primer)
+
 ---
 
 ## The core idea
