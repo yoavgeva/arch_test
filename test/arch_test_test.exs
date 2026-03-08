@@ -6,12 +6,14 @@ defmodule ArchTestTest do
   describe "docs version consistency" do
     test "README installation snippet matches mix.exs version" do
       readme = File.read!(Path.expand("../README.md", __DIR__))
+
       assert readme =~ ~s({:arch_test, "~> #{minor_version(@version)}"),
              "README dep snippet is out of sync with mix.exs version #{@version}"
     end
 
     test "getting-started guide matches mix.exs version" do
       guide = File.read!(Path.expand("../guides/getting-started.md", __DIR__))
+
       assert guide =~ ~s({:arch_test, "~> #{minor_version(@version)}"),
              "guides/getting-started.md dep snippet is out of sync with mix.exs version #{@version}"
     end
