@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-04-10
+
+### Fixed
+
+- **Compilation without Igniter** — mix task files no longer fail with `module Igniter.Mix.Task is not loaded` when Igniter is not a dependency. All task modules are now wrapped in `Code.ensure_loaded?(Igniter.Mix.Task)` guards so they are only defined when Igniter is available.
+
 ## [0.2.0] - 2026-03-08
 
 ### Added
