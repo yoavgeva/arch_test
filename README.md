@@ -68,7 +68,7 @@ If you use [Igniter](https://hex.pm/packages/igniter), ArchTest provides generat
 | Command | What it generates |
 |---------|-------------------|
 | `mix igniter.install arch_test` | Basic arch test file with a cycle check |
-| `mix arch_test.gen.phoenix` | Opinionated Phoenix setup — layers + naming + conventions ([Phoenix Contexts guide](https://hexdocs.pm/phoenix/contexts.html)) |
+| `mix arch_test.gen.phoenix` | Opinionated Phoenix setup — layers + naming + conventions ([Phoenix directory structure](https://hexdocs.pm/phoenix/directory_structure.html) · [N-tier architecture](https://en.wikipedia.org/wiki/Multitier_architecture)) |
 | `mix arch_test.gen.layers` | [Classic web → context → repo layers](guides/layered-architecture.md) ([N-tier architecture](https://en.wikipedia.org/wiki/Multitier_architecture)) |
 | `mix arch_test.gen.onion` | [Onion / hexagonal rings](guides/layered-architecture.md#onion--hexagonal-architecture) ([Onion Architecture](https://jeffreypalermo.com/2008/07/the-onion-architecture-part-1/) · [Hexagonal / Ports & Adapters](https://alistair.cockburn.us/hexagonal-architecture/)) |
 | `mix arch_test.gen.modulith` | [Bounded-context slice isolation](guides/modulith-rules.md) ([Modular Monolith Primer](https://www.kamilgrzybek.com/blog/posts/modular-monolith-primer)) |

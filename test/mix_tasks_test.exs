@@ -7,6 +7,17 @@ defmodule MixTasksTest do
   # Helpers
   # ---------------------------------------------------------------------------
 
+  @all_task_modules [
+    Mix.Tasks.ArchTest.Install,
+    Mix.Tasks.ArchTest.Gen.Conventions,
+    Mix.Tasks.ArchTest.Gen.Freeze,
+    Mix.Tasks.ArchTest.Gen.Layers,
+    Mix.Tasks.ArchTest.Gen.Modulith,
+    Mix.Tasks.ArchTest.Gen.Naming,
+    Mix.Tasks.ArchTest.Gen.Onion,
+    Mix.Tasks.ArchTest.Gen.Phoenix
+  ]
+
   defp run_task(task_module, app_name \\ :my_app) do
     test_project(app_name: app_name)
     |> task_module.igniter()
@@ -16,6 +27,31 @@ defmodule MixTasksTest do
     source = igniter.rewrite.sources[path]
     refute is_nil(source), "Expected #{inspect(path)} to exist in igniter plan"
     Rewrite.Source.get(source, :content)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Conditional compilation guard
+  # ---------------------------------------------------------------------------
+
+  describe "conditional Igniter guard" do
+    test "all task modules are defined when Igniter is available" do
+      for mod <- @all_task_modules do
+        assert Code.ensure_loaded?(mod),
+               "Expected #{inspect(mod)} to be defined when Igniter is available"
+      end
+    end
+
+    test "all task files wrap the defmodule in a Code.ensure_loaded? guard" do
+      task_files = Path.wildcard("lib/mix/tasks/arch_test.*.ex")
+      assert length(task_files) == length(@all_task_modules)
+
+      for file <- task_files do
+        source = File.read!(file)
+
+        assert source =~ ~r/\Aif Code\.ensure_loaded\?\(Igniter\.Mix\.Task\) do\n/,
+               "Expected #{file} to start with Code.ensure_loaded? guard"
+      end
+    end
   end
 
   # ---------------------------------------------------------------------------
