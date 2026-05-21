@@ -1,0 +1,11 @@
+@startuml
+title FixtureApp component dependencies
+
+' Public context dependency.
+[Orders] --> [Accounts]
+
+' Known violations kept in the fixture so ArchTest can prove detection.
+[Orders] --> [Inventory]
+[Orders] --> [Repo]
+[Web] --> [Repo]
+@enduml
