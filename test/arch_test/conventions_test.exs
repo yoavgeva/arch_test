@@ -86,7 +86,7 @@ defmodule ArchTest.ConventionsTest do
       defmodule MyError do
         defexception [:message]
       end
-      def run, do: raise MyError, message: "typed error"
+      def run, do: raise(MyError, message: "typed error")
     end
     """)
 
@@ -212,6 +212,14 @@ defmodule ArchTest.ConventionsTest do
     test "accepts opts keyword" do
       ms = ModuleSet.satisfying(fn _mod -> false end)
       assert Conventions.no_io_puts_in(ms, graph: %{}) == :ok
+    end
+
+    test "forwards collector path and filter options" do
+      assert Conventions.no_io_puts_in(ModuleSet.all(),
+               paths: @beam_dir,
+               include: ["ConventionFixture.CleanModule"],
+               force: true
+             ) == :ok
     end
 
     test "detects IO.puts call" do

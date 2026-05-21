@@ -25,7 +25,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       Igniter.create_new_file(igniter, path, """
       defmodule #{inspect(module)} do
         use ExUnit.Case
-        use ArchTest
+        use ArchTest, app: #{inspect(app)}
 
         # TODO: replace with your actual slices
         test "bounded contexts are isolated" do

@@ -9,7 +9,7 @@ defmodule ArchTest.Layers do
 
       define_layers(
         web:     "MyApp.Web.**",
-        context: "MyApp.**",
+        context: "MyApp.Context.**",
         repo:    "MyApp.Repo.**"
       )
       |> enforce_direction()
@@ -26,7 +26,7 @@ defmodule ArchTest.Layers do
 
   alias ArchTest.{Assertions, Collector, ModuleSet, Violation}
 
-  defstruct layers: [], custom_rules: [], app: nil
+  defstruct layers: [], custom_rules: [], allowed_deps: [], app: nil
 
   @type layer_name :: atom()
   @type t :: %__MODULE__{
@@ -34,6 +34,7 @@ defmodule ArchTest.Layers do
           custom_rules: [
             {layer_name(), :may_only_depend_on | :may_not_depend_on, [layer_name()]}
           ],
+          allowed_deps: [{layer_name(), layer_name()}],
           app: atom() | nil
         }
 
@@ -78,6 +79,15 @@ defmodule ArchTest.Layers do
   end
 
   @doc """
+  Allows one layer to depend on another layer as an explicit exception to the
+  normal top-to-bottom direction rule.
+  """
+  @spec allow_layer_dependency(t(), layer_name(), layer_name()) :: t()
+  def allow_layer_dependency(%__MODULE__{} = arch, from_layer, to_layer) do
+    %{arch | allowed_deps: arch.allowed_deps ++ [{from_layer, to_layer}]}
+  end
+
+  @doc """
   Sets the OTP application to introspect (default: `:all`).
   """
   @spec for_app(t(), atom()) :: t()
@@ -88,9 +98,9 @@ defmodule ArchTest.Layers do
 
   Violations are raised as ExUnit assertion failures.
   """
-  @spec enforce_direction(t()) :: :ok
-  def enforce_direction(%__MODULE__{} = arch) do
-    graph = Collector.build_graph(arch.app || :all)
+  @spec enforce_direction(t(), keyword()) :: :ok
+  def enforce_direction(%__MODULE__{} = arch, opts \\ []) do
+    graph = Keyword.get(opts, :graph) || Collector.build_graph(app_for(arch, opts), opts)
     layer_names = Keyword.keys(arch.layers)
 
     violations =
@@ -112,9 +122,9 @@ defmodule ArchTest.Layers do
 
         for mod <- layer_modules,
             dep <- Collector.dependencies_of(graph, mod),
-            MapSet.member?(higher_layer_modules, dep) do
-          dep_layer = find_layer(dep, arch.layers, graph)
-
+            MapSet.member?(higher_layer_modules, dep),
+            dep_layer = find_layer(dep, arch.layers, graph),
+            {layer_name, dep_layer} not in arch.allowed_deps do
           Violation.forbidden_dep(
             mod,
             dep,
@@ -145,11 +155,11 @@ defmodule ArchTest.Layers do
 
   In other words: dependencies can only point inward.
   """
-  @spec enforce_onion_rules(t()) :: :ok
-  def enforce_onion_rules(%__MODULE__{} = arch) do
+  @spec enforce_onion_rules(t(), keyword()) :: :ok
+  def enforce_onion_rules(%__MODULE__{} = arch, opts \\ []) do
     # For onion architecture, innermost is listed first.
     # Inner rings must not depend on outer rings (higher index = outer).
-    graph = Collector.build_graph(arch.app || :all)
+    graph = Keyword.get(opts, :graph) || Collector.build_graph(app_for(arch, opts), opts)
     layer_names = Keyword.keys(arch.layers)
     total = length(layer_names)
 
@@ -197,6 +207,10 @@ defmodule ArchTest.Layers do
   # ------------------------------------------------------------------
   # Private helpers
   # ------------------------------------------------------------------
+
+  defp app_for(%__MODULE__{} = arch, opts) do
+    Keyword.get(opts, :app, arch.app || :all)
+  end
 
   defp evaluate_custom_rules(%__MODULE__{custom_rules: rules, layers: layers}, graph) do
     Enum.flat_map(rules, fn {layer_name, rule_type, target_layers} ->

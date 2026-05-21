@@ -1,6 +1,6 @@
 # Modulith / Bounded-Context Rules
 
-A **modulith** is a monolith with well-defined internal boundaries — bounded contexts that own their data and expose a clean public API, but run in the same process and share the same database. ArchTest's modulith support enforces those boundaries at compile time so they can't erode silently.
+A **modulith** is a monolith with well-defined internal boundaries — bounded contexts that own their data and expose a clean public API, but run in the same process and share the same database. ArchTest's modulith support enforces those boundaries in ExUnit from compiled bytecode so they can't erode silently.
 
 Further reading: [Modular Monolith: A Primer (Kamil Grzybek)](https://www.kamilgrzybek.com/blog/posts/modular-monolith-primer)
 
@@ -30,6 +30,17 @@ define_slices(
 Each value is the **root namespace** of a context. ArchTest considers:
 - `MyApp.Orders` itself — public API
 - `MyApp.Orders.*` and deeper — internal implementation
+
+If your contexts follow a regular namespace shape, discover them with one
+captured segment:
+
+```elixir
+define_slices_by("MyApp.(*)", app: :my_app,
+  except: ["MyApp.Application", "MyApp.Repo"])
+|> enforce_isolation()
+```
+
+The capture can appear after a wildcard, for example `"MyApp.*.(*)"`.
 
 ---
 
@@ -134,7 +145,7 @@ Combine isolation with cycle detection in a single test file:
 ```elixir
 defmodule MyApp.BoundedContextTest do
   use ExUnit.Case
-  use ArchTest
+  use ArchTest, app: :my_app
 
   @slices [
     orders:    "MyApp.Orders",
@@ -172,9 +183,9 @@ end
 
 test "orders context internal layers" do
   define_layers(
-    web:     "MyApp.Orders.Controllers.**",
-    context: "MyApp.Orders.**",
-    repo:    "MyApp.Orders.Repo.**"
+    web:     "MyApp.OrdersWeb.**",
+    service: "MyApp.Orders.Services.**",
+    repo:    "MyApp.Orders.Repos.**"
   )
   |> enforce_direction()
 end

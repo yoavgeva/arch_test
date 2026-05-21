@@ -5,6 +5,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-21
+
+### Added
+
+- `use ArchTest, app: ...` now automatically scopes assertion, layer, onion,
+  and modulith checks.
+- `use ArchTest, freeze: true` auto-freezes assertion wrappers, with stable
+  structured violation baseline keys.
+- `ArchTest.Collector.build_graph_from_paths/2`, import filters, and
+  function-level `%ArchTest.Call{}` metadata via `calls/2` and
+  `calls_from_path/2`.
+- `ArchTest.Rule` helpers for reusable rules, ignore filters, assertion, and
+  freeze integration.
+- `ArchTest.Modulith.define_slices_by/2` for captured namespace slices.
+- `ArchTest.PlantUML.enforce/2` for component diagram conformance.
+- `ArchTest.Metrics.afferent/2`, `efferent/2`, `fan_in/2`, `fan_out/2`,
+  and `dependency_depth/2`.
+- `ArchTest.Layers.allow_layer_dependency/3` and
+  `ArchTest.allow_layer_dependency/3` for explicit layer-direction exceptions.
+
+### Changed
+
+- Empty assertion subjects now fail by default. Use `allow_empty: true` when an
+  empty subject is intentional.
+- `should_have_module_count/2` accepts `min:` and `max:` aliases for
+  `at_least:` and `at_most:`.
+- `should_be_free_of_cycles/2` now supports both `ModuleSet` checks and
+  `Modulith` slice-cycle checks, so documented modulith pipelines work.
+- `ArchTest.Collector` filters now keep dependency graphs closed by removing
+  excluded modules from both graph keys and dependency edges.
+- `ArchTest.Collector.calls/2` and `calls_from_path/2` now filter callers and
+  callees, ignore generated protocol/compiler noise, and report static remote
+  captures plus static `apply/3` targets.
+- Layer, onion, modulith, and convention helpers now consistently forward
+  graph/scope options to the collector.
+- `ArchTest.Metrics.martin/2` now computes each module against itself rather
+  than treating the whole matched set as one package.
+- `ArchTest.Metrics.coupling/2` now treats a binary namespace root and its
+  descendants as one package, and counts distinct external dependencies.
+- `ArchTest.Modulith.define_slices_by/2` now discovers slices from descendant
+  modules and resolves concrete roots when wildcard segments precede `(*)`.
+- `ArchTest.PlantUML.parse_edges/1` now ignores line comments and PlantUML
+  block comments.
+
+### Fixed
+
+- `use ArchTest, app: ...` now correctly respects per-rule scope overrides for
+  `should_have_module_count/2`.
+- `use ArchTest, freeze: true` now baselines `should_have_module_count/2`
+  failures and includes semantic scope options (`app`, `apps`, `paths`,
+  `include`, `exclude`) in generated freeze IDs.
+- Freeze update mode no longer baselines empty-subject control failures.
+- `should_only_be_called_by/3` now fails on an empty protected object set by
+  default, matching other subject-based assertions.
+- `should_have_module_count/3` no longer treats assertion options such as
+  `rule_id:` and `allow_empty:` as count constraints.
+- `should_have_module_count/3` no longer treats collector scope options such as
+  `apps:`, `paths:`, `include:`, `exclude:`, and `force:` as count constraints.
+- Auto-freeze rule IDs for `should_have_module_count/3` no longer include
+  non-semantic `graph:` data.
+- Repeated `ArchTest.Rule.ignore/2` calls now accumulate filters instead of
+  replacing previous filters for the same field.
+- `use ArchTest` now exposes option-aware `define_layers/2`, `define_onion/2`,
+  and `define_slices/2` helpers.
+- Documentation examples were corrected for freeze usage, layer exceptions,
+  collector options, metric helpers, and non-overlapping layer patterns.
+- Added a 0.2 to 0.3 migration guide with upgrade steps and before/after code
+  examples for app scoping, conventions, empty subjects, freeze baselines,
+  layer patterns, modulith slices, and reusable rules.
+- Igniter generators now emit `use ArchTest, app: ...`, use safer
+  non-overlapping layer defaults, pass app scope to generated convention checks,
+  and mark optional schema-placement checks with `allow_empty: true`.
+
 ## [0.2.1] - 2026-04-10
 
 ### Fixed

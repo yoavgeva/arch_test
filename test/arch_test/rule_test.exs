@@ -50,6 +50,18 @@ defmodule ArchTest.RuleTest do
       assert {:violations, violations} = Rule.evaluate(rule, @sample_graph)
       assert length(violations) == 2
     end
+
+    test "repeated ignore filters accumulate" do
+      v1 = Violation.forbidden_dep(A, B, "v1")
+      v2 = Violation.forbidden_dep(A, C, "v2")
+
+      rule =
+        Rule.new("ignore several callees", fn _graph -> [v1, v2] end)
+        |> Rule.ignore(callee: "B")
+        |> Rule.ignore(callee: "C")
+
+      assert Rule.evaluate(rule, @sample_graph) == {:ok, []}
+    end
   end
 
   describe "struct" do

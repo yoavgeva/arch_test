@@ -13,7 +13,7 @@ modules_matching("**.*Service")         # last segment ends with Service
 modules_matching("**.*Service*")        # last segment contains Service
 modules_matching("MyApp.**.*Repo")      # under MyApp, ends with Repo
 modules_in("MyApp.Orders")             # shorthand for "MyApp.Orders.*"
-all_modules()                          # every loaded module
+all_modules()                          # every module in scoped app
 ```
 
 ### Custom predicate
@@ -104,7 +104,7 @@ modules_matching("MyApp.Web.**")
 
 # Count
 modules_matching("MyApp.**.*God")
-|> should_have_module_count(max: 0)
+|> should_have_module_count(at_most: 0)
 ```
 
 ## Behaviour / Protocol / Attribute Rules
@@ -149,9 +149,13 @@ modules_matching("MyApp.Domain.**")
 ```elixir
 define_layers(
   web:     "MyApp.Web.**",
-  context: "MyApp.**",
+  context: "MyApp.Context.**",
   repo:    "MyApp.Repo.**"
 )
+|> enforce_direction()
+
+define_layers(web: "MyApp.Web.**", context: "MyApp.Context.**", repo: "MyApp.Repo.**")
+|> allow_layer_dependency(:context, :web)
 |> enforce_direction()
 ```
 
@@ -195,21 +199,30 @@ define_slices(
 ### Cycle detection
 
 ```elixir
-define_slices([...]) |> should_be_free_of_cycles()
+define_slices(orders: "MyApp.Orders", accounts: "MyApp.Accounts")
+|> should_be_free_of_cycles()
+```
+
+### Discover slices
+
+```elixir
+define_slices_by("MyApp.(*)", app: :my_app, except: ["MyApp.Application"])
+|> enforce_isolation()
 ```
 
 ## Code Conventions
 
 ```elixir
+use ArchTest, app: :my_app
 use ArchTest.Conventions
 
-no_io_puts_in(modules_matching("MyApp.**"))
-no_process_sleep_in(modules_matching("MyApp.**"))
-no_application_get_env_in(modules_matching("MyApp.Domain.**"))
-no_dbg_in(modules_matching("MyApp.**"))
-no_raise_string_in(modules_matching("MyApp.**"))
-no_plug_in(modules_matching("MyApp.Domain.**"))
-all_public_functions_documented(modules_matching("MyApp.**.*Repo"))
+no_io_puts_in(modules_matching("MyApp.**"), app: :my_app)
+no_process_sleep_in(modules_matching("MyApp.**"), app: :my_app)
+no_application_get_env_in(modules_matching("MyApp.Domain.**"), app: :my_app)
+no_dbg_in(modules_matching("MyApp.**"), app: :my_app)
+no_raise_string_in(modules_matching("MyApp.**"), app: :my_app)
+no_plug_in(modules_matching("MyApp.Domain.**"), app: :my_app)
+all_public_functions_documented(modules_matching("MyApp.**.*Repo"), app: :my_app)
 ```
 
 ## Coupling Metrics
@@ -258,7 +271,7 @@ Baseline files live in `test/arch_test_violations/`. Commit them. Delete the fil
 ```elixir
 defmodule MyApp.ArchTest do
   use ExUnit.Case
-  use ArchTest
+  use ArchTest, app: :my_app
 end
 ```
 
@@ -266,6 +279,21 @@ end
 
 ```elixir
 use ArchTest, app: :my_app
+```
+
+### Auto-freeze all rules in a test module
+
+```elixir
+use ArchTest, app: :my_app, freeze: true
+```
+
+Use `rule_id:` for stable baseline filenames.
+
+### Intentional empty matches
+
+```elixir
+modules_matching("MyApp.Legacy.**")
+|> should_not_exist(allow_empty: true)
 ```
 
 ### Configure freeze directory
@@ -281,7 +309,7 @@ Add `{:igniter, "~> 0.7", only: [:dev, :test], runtime: false}`, then:
 
 | Command | Guide | Further reading |
 |---------|-------|-----------------|
-| `mix igniter.install arch_test` | Basic cycle-check file | |
+| `mix igniter.install arch_test` / `mix arch_test.install` | Basic cycle-check file | |
 | `mix arch_test.gen.phoenix` | Layers + naming + conventions combined | [Phoenix directory structure](https://hexdocs.pm/phoenix/directory_structure.html) · [N-tier architecture](https://en.wikipedia.org/wiki/Multitier_architecture) |
 | `mix arch_test.gen.layers` | [Layered Architecture](layered-architecture.md) | [N-tier architecture](https://en.wikipedia.org/wiki/Multitier_architecture) |
 | `mix arch_test.gen.onion` | [Layered Architecture — Onion](layered-architecture.md#onion--hexagonal-architecture) | [Onion Architecture](https://jeffreypalermo.com/2008/07/the-onion-architecture-part-1/) · [Hexagonal / Ports & Adapters](https://alistair.cockburn.us/hexagonal-architecture/) |
@@ -289,3 +317,6 @@ Add `{:igniter, "~> 0.7", only: [:dev, :test], runtime: false}`, then:
 | `mix arch_test.gen.naming` | Naming Rules section above | |
 | `mix arch_test.gen.conventions` | Code Conventions section above | |
 | `mix arch_test.gen.freeze` | [Gradual Adoption — Freeze](freezing.md) | |
+
+Generated tests are scoped with `use ArchTest, app: :your_app`; edit the
+generated namespace patterns before treating them as policy.

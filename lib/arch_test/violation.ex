@@ -13,6 +13,10 @@ defmodule ArchTest.Violation do
     :callee,
     :module,
     :path,
+    :file,
+    :line,
+    :caller_function,
+    :callee_function,
     :message
   ]
 
@@ -31,6 +35,10 @@ defmodule ArchTest.Violation do
           callee: module() | nil,
           module: module() | nil,
           path: [module()] | nil,
+          file: String.t() | nil,
+          line: pos_integer() | nil,
+          caller_function: {atom(), non_neg_integer()} | nil,
+          callee_function: {atom(), non_neg_integer()} | nil,
           message: String.t()
         }
 
@@ -60,6 +68,38 @@ defmodule ArchTest.Violation do
   """
   @spec format(t()) :: String.t()
   def format(%__MODULE__{} = v), do: format_single(v)
+
+  @doc """
+  Returns a stable, structured key suitable for freeze baselines.
+
+  The key is intentionally line-oriented and text-friendly, but it is derived
+  from the violation struct rather than parsed from rendered assertion output.
+  """
+  @spec key(t()) :: String.t()
+  def key(%__MODULE__{} = v) do
+    [
+      {"type", v.type},
+      {"caller", v.caller},
+      {"callee", v.callee},
+      {"module", v.module},
+      {"path", format_path(v.path)},
+      {"caller_function", format_function(v.caller_function)},
+      {"callee_function", format_function(v.callee_function)},
+      {"location", format_location(v.file, v.line)},
+      {"message", normalize_message(v.message)}
+    ]
+    |> Enum.map_join("\t", fn {key, value} -> "#{key}=#{format_value(value)}" end)
+  end
+
+  @doc """
+  Returns sorted stable keys for all violations.
+  """
+  @spec keys([t()]) :: [String.t()]
+  def keys(violations) do
+    violations
+    |> Enum.map(&key/1)
+    |> Enum.sort()
+  end
 
   @doc """
   Builds a `:forbidden_dep` violation.
@@ -178,14 +218,16 @@ defmodule ArchTest.Violation do
 
     """
         ✗ depends on #{inspect(callee)}  [transitive]
+          #{format_location_line(caller, nil)}
           #{msg}
           via: #{path_str}\
     """
   end
 
-  defp format_single(%__MODULE__{caller: _caller, callee: callee, message: msg})
+  defp format_single(%__MODULE__{caller: caller, callee: callee, message: msg} = v)
        when not is_nil(callee) do
-    "    ✗ depends on #{inspect(callee)}\n      #{msg}"
+    location = format_location_line(caller, v)
+    "    ✗ depends on #{inspect(callee)}#{location}\n      #{msg}"
   end
 
   defp format_single(%__MODULE__{type: :existence, module: mod, message: msg})
@@ -209,4 +251,39 @@ defmodule ArchTest.Violation do
       line -> pad <> line
     end)
   end
+
+  defp format_location_line(_caller, %{file: file, line: line})
+       when is_binary(file) and is_integer(line) do
+    " at #{file}:#{line}"
+  end
+
+  defp format_location_line(_caller, _violation), do: ""
+
+  defp format_value(nil), do: ""
+
+  defp format_value(value) when is_atom(value),
+    do: value |> Atom.to_string() |> strip_elixir_prefix()
+
+  defp format_value(value), do: to_string(value)
+
+  defp format_path(nil), do: nil
+  defp format_path(path), do: Enum.map_join(path, " -> ", &format_value/1)
+
+  defp format_function(nil), do: nil
+  defp format_function({name, arity}), do: "#{name}/#{arity}"
+  defp format_function(value), do: inspect(value)
+
+  defp format_location(nil, _line), do: nil
+  defp format_location(_file, nil), do: nil
+  defp format_location(file, line), do: "#{file}:#{line}"
+
+  defp normalize_message(message) do
+    message
+    |> to_string()
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+  end
+
+  defp strip_elixir_prefix("Elixir." <> rest), do: rest
+  defp strip_elixir_prefix(other), do: other
 end

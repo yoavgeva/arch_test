@@ -1,7 +1,7 @@
 defmodule ArchTest.MixProject do
   use Mix.Project
 
-  @version "0.2.1"
+  @version "0.3.0"
   @source_url "https://github.com/yoavgeva/arch_test"
 
   def project do
@@ -24,7 +24,7 @@ defmodule ArchTest.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :tools]
+      extra_applications: [:logger, :tools, :crypto]
     ]
   end
 
@@ -72,6 +72,8 @@ defmodule ArchTest.MixProject do
       extras: [
         "README.md",
         "guides/getting-started.md",
+        "guides/migrating-to-0.3.md",
+        "guides/advanced-rules.md",
         "guides/layered-architecture.md",
         "guides/modulith-rules.md",
         "guides/freezing.md",
@@ -82,6 +84,8 @@ defmodule ArchTest.MixProject do
       groups_for_extras: [
         Guides: [
           "guides/getting-started.md",
+          "guides/migrating-to-0.3.md",
+          "guides/advanced-rules.md",
           "guides/layered-architecture.md",
           "guides/modulith-rules.md",
           "guides/freezing.md"
@@ -93,8 +97,9 @@ defmodule ArchTest.MixProject do
       groups_for_modules: [
         "Core DSL": [ArchTest, ArchTest.ModuleSet, ArchTest.Assertions],
         "Architecture Patterns": [ArchTest.Layers, ArchTest.Modulith],
-        "Data Collection": [ArchTest.Collector, ArchTest.Pattern],
+        "Data Collection": [ArchTest.Collector, ArchTest.Call, ArchTest.Pattern],
         "Advanced Features": [ArchTest.Freeze, ArchTest.Metrics, ArchTest.Conventions],
+        "Diagram Conformance": [ArchTest.PlantUML],
         Internals: [ArchTest.Rule, ArchTest.Violation]
       ]
     ]

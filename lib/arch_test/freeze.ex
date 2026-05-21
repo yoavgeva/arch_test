@@ -9,9 +9,10 @@ defmodule ArchTest.Freeze do
   ## Usage
 
       test "legacy dependencies being cleaned up" do
-        modules_matching("MyApp.**")
-        |> should_not_depend_on(modules_matching("MyApp.Legacy.**"))
-        |> freeze("legacy_deps")
+        ArchTest.Freeze.freeze("legacy_deps", fn ->
+          modules_matching("MyApp.**")
+          |> should_not_depend_on(modules_matching("MyApp.Legacy.**"))
+        end)
       end
 
   ## Baseline files
@@ -47,7 +48,7 @@ defmodule ArchTest.Freeze do
   """
   @spec freeze(String.t(), (-> :ok)) :: :ok
   def freeze(rule_id, assertion_fn) when is_function(assertion_fn, 0) do
-    violations = collect_violations(assertion_fn)
+    violations = collect_violation_keys(assertion_fn)
     store_path = store_path()
     baseline_file = Path.join(store_path, "#{rule_id}.txt")
 
@@ -89,18 +90,57 @@ defmodule ArchTest.Freeze do
     System.get_env("ARCH_TEST_UPDATE_FREEZE") in ["1", "true", "yes"]
   end
 
+  @doc """
+  Builds a deterministic rule id for auto-freeze wrappers.
+
+  Callers should prefer an explicit `rule_id:` option for long-lived baselines,
+  but this keeps `use ArchTest, freeze: true` usable out of the box.
+  """
+  @spec rule_id(module(), String.t(), [term()]) :: String.t()
+  def rule_id(module, rule_name, args) do
+    module_name =
+      module
+      |> inspect()
+      |> String.replace(~r/^Elixir\./, "")
+      |> String.replace(~r/[^A-Za-z0-9_.-]/, "_")
+
+    fingerprint =
+      args
+      |> :erlang.term_to_binary()
+      |> then(&:crypto.hash(:sha256, &1))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 12)
+
+    "#{module_name}.#{rule_name}.#{fingerprint}"
+  end
+
   # ------------------------------------------------------------------
   # Private helpers
   # ------------------------------------------------------------------
 
-  # Runs the assertion function and captures violations instead of raising.
-  defp collect_violations(assertion_fn) do
-    assertion_fn.()
-    []
+  # Runs the assertion function and captures structured ArchTest violations
+  # instead of parsing rendered assertion output. The text parser remains as a
+  # fallback for hand-written ExUnit assertions wrapped in Freeze.freeze/2.
+  defp collect_violation_keys(assertion_fn) do
+    assertion_fn
+    |> ArchTest.Assertions.capture_violations()
+    |> ArchTest.Violation.keys()
   rescue
     e in ExUnit.AssertionError ->
-      extract_violation_keys(e.message)
+      if arch_test_control_failure?(e.message) do
+        reraise e, __STACKTRACE__
+      else
+        extract_violation_keys(e.message)
+      end
   end
+
+  defp arch_test_control_failure?(message) when is_binary(message) do
+    String.starts_with?(message, "ArchTest —") and
+      (String.contains?(message, "subject resolved to 0 modules") or
+         String.contains?(message, "unknown constraint"))
+  end
+
+  defp arch_test_control_failure?(_message), do: false
 
   # Extracts sortable violation keys from an AssertionError message.
   # Each non-empty, non-header line is used as a key so that all violation

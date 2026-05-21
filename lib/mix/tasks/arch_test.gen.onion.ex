@@ -25,7 +25,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       Igniter.create_new_file(igniter, path, """
       defmodule #{inspect(module)} do
         use ExUnit.Case
-        use ArchTest
+        use ArchTest, app: #{inspect(app)}
 
         test "dependencies point inward only" do
           define_onion(

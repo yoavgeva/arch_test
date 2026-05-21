@@ -13,6 +13,23 @@ defmodule ArchTest.Assertions do
 
   alias ArchTest.{Collector, ModuleSet, Pattern, Violation}
 
+  @capture_key {__MODULE__, :capture_violations}
+
+  @doc false
+  def capture_violations(assertion_fn) when is_function(assertion_fn, 0) do
+    previous = Process.get(@capture_key, false)
+    Process.put(@capture_key, true)
+
+    try do
+      assertion_fn.()
+      []
+    catch
+      {:arch_test_violations, violations} -> violations
+    after
+      Process.put(@capture_key, previous)
+    end
+  end
+
   @doc """
   Asserts that no module in `subject` directly depends on any module in `object`.
 
@@ -27,7 +44,7 @@ defmodule ArchTest.Assertions do
     subject_mods = ModuleSet.resolve(subject, graph)
     object_mods = ModuleSet.resolve(object, graph) |> MapSet.new()
 
-    warn_if_empty(subject_mods, subject, "should_not_depend_on")
+    warn_if_empty(subject_mods, subject, "should_not_depend_on", opts)
 
     violations =
       for caller <- subject_mods,
@@ -69,7 +86,7 @@ defmodule ArchTest.Assertions do
     subject_mods = ModuleSet.resolve(subject, graph)
     allowed_mods = ModuleSet.resolve(allowed, graph) |> MapSet.new()
 
-    warn_if_empty(subject_mods, subject, "should_only_depend_on")
+    warn_if_empty(subject_mods, subject, "should_only_depend_on", opts)
 
     violations =
       for caller <- subject_mods,
@@ -113,7 +130,7 @@ defmodule ArchTest.Assertions do
     object_mods = ModuleSet.resolve(object, graph) |> MapSet.new()
     caller_mods = ModuleSet.resolve(callers, graph)
 
-    warn_if_empty(MapSet.to_list(object_mods), object, "should_not_be_called_by")
+    warn_if_empty(MapSet.to_list(object_mods), object, "should_not_be_called_by", opts)
 
     violations =
       for caller <- caller_mods,
@@ -161,6 +178,8 @@ defmodule ArchTest.Assertions do
     object_mods = ModuleSet.resolve(object, graph) |> MapSet.new()
     allowed_mods = ModuleSet.resolve(allowed_callers, graph) |> MapSet.new()
 
+    warn_if_empty(MapSet.to_list(object_mods), object, "should_only_be_called_by", opts)
+
     violations =
       for {caller, deps} <- graph,
           not MapSet.member?(allowed_mods, caller),
@@ -200,7 +219,7 @@ defmodule ArchTest.Assertions do
     subject_mods = ModuleSet.resolve(subject, graph)
     object_mods = ModuleSet.resolve(object, graph) |> MapSet.new()
 
-    warn_if_empty(subject_mods, subject, "should_not_transitively_depend_on")
+    warn_if_empty(subject_mods, subject, "should_not_transitively_depend_on", opts)
 
     violations =
       for caller <- subject_mods do
@@ -275,7 +294,7 @@ defmodule ArchTest.Assertions do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
 
-    warn_if_empty(subject_mods, subject, "should_reside_under")
+    warn_if_empty(subject_mods, subject, "should_reside_under", opts)
 
     violations =
       for mod <- subject_mods,
@@ -309,7 +328,7 @@ defmodule ArchTest.Assertions do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
 
-    warn_if_empty(subject_mods, subject, "should_have_name_matching")
+    warn_if_empty(subject_mods, subject, "should_have_name_matching", opts)
 
     violations =
       for mod <- subject_mods,
@@ -343,7 +362,7 @@ defmodule ArchTest.Assertions do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph) |> MapSet.new()
 
-    warn_if_empty(MapSet.to_list(subject_mods), subject, "should_be_free_of_cycles")
+    warn_if_empty(MapSet.to_list(subject_mods), subject, "should_be_free_of_cycles", opts)
 
     # Build a subgraph restricted to subject modules
     subgraph =
@@ -389,7 +408,7 @@ defmodule ArchTest.Assertions do
   def should_export(%ModuleSet{} = subject, fun_name, arity, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_export")
+    warn_if_empty(subject_mods, subject, "should_export", opts)
 
     violations =
       for mod <- subject_mods,
@@ -420,7 +439,7 @@ defmodule ArchTest.Assertions do
   def should_not_export(%ModuleSet{} = subject, fun_name, arity, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_not_export")
+    warn_if_empty(subject_mods, subject, "should_not_export", opts)
 
     violations =
       for mod <- subject_mods,
@@ -457,7 +476,7 @@ defmodule ArchTest.Assertions do
   def should_have_public_functions_matching(%ModuleSet{} = subject, pattern, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_have_public_functions_matching")
+    warn_if_empty(subject_mods, subject, "should_have_public_functions_matching", opts)
 
     violations =
       for mod <- subject_mods,
@@ -497,7 +516,7 @@ defmodule ArchTest.Assertions do
   def should_not_have_public_functions_matching(%ModuleSet{} = subject, pattern, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_not_have_public_functions_matching")
+    warn_if_empty(subject_mods, subject, "should_not_have_public_functions_matching", opts)
 
     violations =
       for mod <- subject_mods,
@@ -553,8 +572,20 @@ defmodule ArchTest.Assertions do
   """
   @spec should_have_module_count(ModuleSet.t(), keyword()) :: :ok
   def should_have_module_count(%ModuleSet{} = subject, constraints) when is_list(constraints) do
-    opts_keys = [:graph, :app, :message]
-    count_constraints = Keyword.drop(constraints, opts_keys)
+    opts_keys = [
+      :graph,
+      :app,
+      :apps,
+      :paths,
+      :include,
+      :exclude,
+      :force,
+      :message,
+      :rule_id,
+      :allow_empty
+    ]
+
+    count_constraints = constraints |> Keyword.drop(opts_keys) |> normalize_count_constraints()
     opts = Keyword.take(constraints, opts_keys)
 
     graph = get_graph(opts)
@@ -595,6 +626,20 @@ defmodule ArchTest.Assertions do
     end
   end
 
+  @spec should_have_module_count(ModuleSet.t(), keyword(), keyword()) :: :ok
+  def should_have_module_count(%ModuleSet{} = subject, constraints, opts)
+      when is_list(constraints) and is_list(opts) do
+    should_have_module_count(subject, Keyword.merge(constraints, opts))
+  end
+
+  defp normalize_count_constraints(constraints) do
+    Enum.map(constraints, fn
+      {:min, value} -> {:at_least, value}
+      {:max, value} -> {:at_most, value}
+      constraint -> constraint
+    end)
+  end
+
   @doc """
   Applies a custom check function to all modules in `subject`.
 
@@ -615,7 +660,7 @@ defmodule ArchTest.Assertions do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
 
-    warn_if_empty(subject_mods, subject, "satisfying")
+    warn_if_empty(subject_mods, subject, "satisfying", opts)
 
     violations =
       subject_mods
@@ -642,7 +687,7 @@ defmodule ArchTest.Assertions do
   def should_implement_behaviour(%ModuleSet{} = subject, behaviour, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_implement_behaviour")
+    warn_if_empty(subject_mods, subject, "should_implement_behaviour", opts)
 
     violations =
       for mod <- subject_mods,
@@ -678,7 +723,7 @@ defmodule ArchTest.Assertions do
   def should_not_implement_behaviour(%ModuleSet{} = subject, behaviour, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_not_implement_behaviour")
+    warn_if_empty(subject_mods, subject, "should_not_implement_behaviour", opts)
 
     violations =
       for mod <- subject_mods,
@@ -714,7 +759,7 @@ defmodule ArchTest.Assertions do
   def should_implement_protocol(%ModuleSet{} = subject, protocol, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_implement_protocol")
+    warn_if_empty(subject_mods, subject, "should_implement_protocol", opts)
 
     violations =
       for mod <- subject_mods,
@@ -750,7 +795,7 @@ defmodule ArchTest.Assertions do
   def should_not_implement_protocol(%ModuleSet{} = subject, protocol, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_not_implement_protocol")
+    warn_if_empty(subject_mods, subject, "should_not_implement_protocol", opts)
 
     violations =
       for mod <- subject_mods,
@@ -787,7 +832,7 @@ defmodule ArchTest.Assertions do
       when is_atom(attr_key) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_have_attribute")
+    warn_if_empty(subject_mods, subject, "should_have_attribute", opts)
 
     violations =
       for mod <- subject_mods,
@@ -826,7 +871,7 @@ defmodule ArchTest.Assertions do
       when is_atom(attr_key) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_not_have_attribute")
+    warn_if_empty(subject_mods, subject, "should_not_have_attribute", opts)
 
     violations =
       for mod <- subject_mods,
@@ -865,7 +910,7 @@ defmodule ArchTest.Assertions do
   def should_have_attribute_value(%ModuleSet{} = subject, attr_key, attr_value, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_have_attribute_value")
+    warn_if_empty(subject_mods, subject, "should_have_attribute_value", opts)
 
     violations =
       for mod <- subject_mods,
@@ -901,7 +946,7 @@ defmodule ArchTest.Assertions do
   def should_not_have_attribute_value(%ModuleSet{} = subject, attr_key, attr_value, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_not_have_attribute_value")
+    warn_if_empty(subject_mods, subject, "should_not_have_attribute_value", opts)
 
     violations =
       for mod <- subject_mods,
@@ -942,7 +987,7 @@ defmodule ArchTest.Assertions do
   def should_use(%ModuleSet{} = subject, used_module, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_use")
+    warn_if_empty(subject_mods, subject, "should_use", opts)
 
     violations =
       for mod <- subject_mods,
@@ -972,7 +1017,7 @@ defmodule ArchTest.Assertions do
   def should_not_use(%ModuleSet{} = subject, used_module, opts \\ []) do
     graph = get_graph(opts)
     subject_mods = ModuleSet.resolve(subject, graph)
-    warn_if_empty(subject_mods, subject, "should_not_use")
+    warn_if_empty(subject_mods, subject, "should_not_use", opts)
 
     violations =
       for mod <- subject_mods,
@@ -995,28 +1040,36 @@ defmodule ArchTest.Assertions do
     case Keyword.get(opts, :graph) do
       nil ->
         app = Keyword.get(opts, :app, :all)
-        Collector.build_graph(app)
+        Collector.build_graph(app, opts)
 
       graph when is_map(graph) ->
         graph
     end
   end
 
-  # Warn when the subject resolved to zero modules — almost certainly a
-  # wrong pattern, which would silently pass every rule.
-  defp warn_if_empty([], subject, rule) do
-    patterns = Enum.map_join(subject.include_patterns, ", ", &inspect/1)
-
-    require Logger
-
-    Logger.warning(
-      "[ArchTest] #{rule}: subject resolved to 0 modules " <>
-        "(patterns: #{patterns}). " <>
-        "The rule passes trivially — check your pattern is correct."
-    )
+  # Empty subjects usually mean a typoed pattern. Rules fail by default so
+  # architecture checks do not silently pass, with `allow_empty: true` as the
+  # explicit escape hatch.
+  defp warn_if_empty([], subject, rule, opts) do
+    if Keyword.get(opts, :allow_empty, false) do
+      :ok
+    else
+      raise_empty_subject!(subject, rule)
+    end
   end
 
-  defp warn_if_empty(_mods, _subject, _rule), do: :ok
+  defp warn_if_empty(_mods, _subject, _rule, _opts), do: :ok
+
+  defp raise_empty_subject!(subject, rule) do
+    patterns = Enum.map_join(subject.include_patterns, ", ", &inspect/1)
+
+    raise ExUnit.AssertionError,
+      message:
+        "ArchTest — #{rule} — subject resolved to 0 modules\n" <>
+          "  rule:    #{rule}\n" <>
+          "  subject: #{patterns}\n" <>
+          "  fix:     update the pattern or pass allow_empty: true when an empty set is expected"
+  end
 
   defp implements_behaviour?(mod, behaviour) do
     mod.__info__(:attributes)
@@ -1107,6 +1160,8 @@ defmodule ArchTest.Assertions do
   def assert_no_violations_public([], _rule_name, context) when is_binary(context), do: :ok
 
   def assert_no_violations_public(violations, rule_name, context) when is_binary(context) do
+    maybe_capture!(violations)
+
     count = length(violations)
     formatted = Violation.format_all(violations)
 
@@ -1130,6 +1185,8 @@ defmodule ArchTest.Assertions do
   def assert_no_violations_public([], _rule_name, _subject, _object, _user_message), do: :ok
 
   def assert_no_violations_public(violations, rule_name, subject, object, user_message) do
+    maybe_capture!(violations)
+
     count = length(violations)
     formatted = Violation.format_all(violations)
     context_hint = build_context_hint(rule_name, subject, object)
@@ -1167,5 +1224,13 @@ defmodule ArchTest.Assertions do
     "\n  rule:    #{rule_name}" <>
       "\n  subject: #{sub_patterns}" <>
       "\n  object:  #{obj_patterns}"
+  end
+
+  defp maybe_capture!(violations) do
+    if Process.get(@capture_key, false) do
+      throw({:arch_test_violations, violations})
+    else
+      :ok
+    end
   end
 end

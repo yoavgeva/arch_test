@@ -51,6 +51,30 @@ defmodule ArchTest.MetricsTest do
       assert metrics.efferent == 1
       assert_in_delta metrics.instability, 1.0, 0.001
     end
+
+    test "package efferent coupling counts distinct external dependencies" do
+      graph = %{
+        A.Root => [A.Internal, B.ExternalOne, B.ExternalTwo],
+        A.Internal => [B.ExternalTwo],
+        B.ExternalOne => [],
+        B.ExternalTwo => []
+      }
+
+      metrics = Metrics.coupling("A", graph: graph)
+
+      assert metrics.efferent == 2
+    end
+
+    test "binary namespace root includes descendant modules" do
+      graph = %{
+        MyApp.Orders.Checkout => [MyApp.Inventory.Repo],
+        MyApp.Inventory.Repo => []
+      }
+
+      metrics = Metrics.coupling("MyApp.Orders", graph: graph)
+
+      assert metrics.efferent == 1
+    end
   end
 
   describe "instability/2" do
@@ -112,6 +136,14 @@ defmodule ArchTest.MetricsTest do
         expected = abs(m.abstractness + m.instability - 1.0)
         assert_in_delta m.distance, expected, 0.001
       end
+    end
+
+    test "computes each module against itself, not the whole matched package" do
+      result = Metrics.martin("**", opts())
+
+      assert result[:"App.Service"].afferent == 1
+      assert result[:"App.Service"].efferent == 1
+      assert_in_delta result[:"App.Service"].instability, 0.5, 0.001
     end
 
     test "empty pattern returns empty map" do

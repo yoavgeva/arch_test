@@ -9,15 +9,15 @@ defmodule ArchTest.Conventions do
 
       defmodule MyApp.ConventionTest do
         use ExUnit.Case
-        use ArchTest
+        use ArchTest, app: :my_app
         use ArchTest.Conventions
 
         test "no IO.puts in production code" do
-          assert no_io_puts_in(modules_matching("MyApp.**"))
+          assert no_io_puts_in(modules_matching("MyApp.**"), app: :my_app)
         end
 
         test "domain modules don't use Plug" do
-          assert no_plug_in(modules_matching("MyApp.Domain.**"))
+          assert no_plug_in(modules_matching("MyApp.Domain.**"), app: :my_app)
         end
       end
   """
@@ -218,7 +218,7 @@ defmodule ArchTest.Conventions do
 
   defp get_graph(opts) do
     case Keyword.get(opts, :graph) do
-      nil -> Collector.build_graph(Keyword.get(opts, :app, :all))
+      nil -> Collector.build_graph(Keyword.get(opts, :app, :all), opts)
       graph -> graph
     end
   end

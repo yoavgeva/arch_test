@@ -25,7 +25,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       Igniter.create_new_file(igniter, path, """
       defmodule #{inspect(module)} do
         use ExUnit.Case
-        use ArchTest
+        use ArchTest, app: #{inspect(app)}
 
         test "no Manager modules" do
           modules_matching("#{ns}.**.*Manager") |> should_not_exist()
@@ -37,7 +37,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
 
         test "Ecto schemas reside under a Schemas namespace" do
           modules_satisfying(fn m -> function_exported?(m, :__schema__, 1) end)
-          |> should_reside_under("#{ns}.**.Schemas")
+          |> should_reside_under("#{ns}.**.Schemas", allow_empty: true)
         end
       end
       """)

@@ -226,10 +226,17 @@ defmodule ArchTest.AssertionsTest do
       end
     end
 
-    test "passes vacuously for empty subject" do
+    test "fails on empty subject unless explicitly allowed" do
       ms = ModuleSet.satisfying(fn _ -> false end)
 
-      assert ArchTest.Assertions.should_implement_behaviour(ms, GenServer, graph: %{}) == :ok
+      assert_raise ExUnit.AssertionError, ~r/subject resolved to 0 modules/, fn ->
+        ArchTest.Assertions.should_implement_behaviour(ms, GenServer, graph: %{})
+      end
+
+      assert ArchTest.Assertions.should_implement_behaviour(ms, GenServer,
+               graph: %{},
+               allow_empty: true
+             ) == :ok
     end
   end
 
@@ -740,6 +747,17 @@ defmodule ArchTest.AssertionsTest do
                :ok
     end
 
+    test "accepts min and max aliases" do
+      ms = ModuleSet.new("FixtureApp.Orders.*")
+      count = ms |> ModuleSet.resolve(@graph) |> length()
+
+      assert ArchTest.Assertions.should_have_module_count(ms,
+               min: 1,
+               max: count,
+               graph: @graph
+             ) == :ok
+    end
+
     test "fails with at_most when too many modules" do
       ms = ModuleSet.new("FixtureApp.**")
 
@@ -813,6 +831,29 @@ defmodule ArchTest.AssertionsTest do
           message: "too many modules"
         )
       end
+    end
+
+    test "rule_id option is not treated as a count constraint" do
+      ms = ModuleSet.new("NoMatch.**")
+
+      assert ArchTest.Assertions.should_have_module_count(
+               ms,
+               [exactly: 0],
+               graph: @graph,
+               rule_id: "count_rule"
+             ) == :ok
+    end
+
+    test "collector scope options are not treated as count constraints" do
+      ms = ModuleSet.new("FixtureApp.Orders.*")
+      count = ms |> ModuleSet.resolve(@graph) |> length()
+
+      assert ArchTest.Assertions.should_have_module_count(
+               ms,
+               exactly: count,
+               include: ["NoMatch.**"],
+               graph: @graph
+             ) == :ok
     end
 
     test "combined constraints fail when any is violated" do
@@ -1209,9 +1250,15 @@ defmodule ArchTest.AssertionsTest do
       end
     end
 
-    test "empty subject passes with no violations" do
+    test "empty subject fails unless explicitly allowed" do
       ms = ModuleSet.new("NoMatch.Namespace.**")
-      assert ArchTest.Assertions.should_be_free_of_cycles(ms, graph: @graph) == :ok
+
+      assert_raise ExUnit.AssertionError, ~r/subject resolved to 0 modules/, fn ->
+        ArchTest.Assertions.should_be_free_of_cycles(ms, graph: @graph)
+      end
+
+      assert ArchTest.Assertions.should_be_free_of_cycles(ms, graph: @graph, allow_empty: true) ==
+               :ok
     end
   end
 
@@ -1322,6 +1369,15 @@ defmodule ArchTest.AssertionsTest do
 
       # RepoA calls RepoB, but since RepoA is in the object set, it should not be a violation
       assert ArchTest.Assertions.should_only_be_called_by(object, allowed, graph: graph) == :ok
+    end
+
+    test "empty object fails by default" do
+      object = ModuleSet.new("NoMatch.**")
+      allowed = ModuleSet.new("FixtureApp.Orders.**")
+
+      assert_raise ExUnit.AssertionError, ~r/subject resolved to 0 modules/, fn ->
+        ArchTest.Assertions.should_only_be_called_by(object, allowed, graph: @graph)
+      end
     end
   end
 

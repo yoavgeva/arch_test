@@ -44,6 +44,19 @@ defmodule ArchTest.LayersTest do
                v.caller == FixtureApp.Orders.OrderService
              end)
     end
+
+    test "allow_layer_dependency permits a documented upward exception" do
+      graph = %{
+        MyApp.Context.Service => [MyApp.Web.Router],
+        MyApp.Web.Router => []
+      }
+
+      layers =
+        Layers.define_layers(web: "MyApp.Web.**", context: "MyApp.Context.**")
+        |> Layers.allow_layer_dependency(:context, :web)
+
+      assert Layers.enforce_direction(layers, graph: graph) == :ok
+    end
   end
 
   describe "enforce_onion_rules/1" do
@@ -80,6 +93,18 @@ defmodule ArchTest.LayersTest do
       violations = check_onion_rules(onion, clean_graph)
       assert violations == []
     end
+
+    test "public onion enforcement accepts graph option" do
+      graph = %{
+        MyApp.Domain.Order => [MyApp.Web.Controller],
+        MyApp.Web.Controller => []
+      }
+
+      assert_raise ExUnit.AssertionError, ~r/onion rule/, fn ->
+        ArchTest.define_onion(domain: "MyApp.Domain.**", web: "MyApp.Web.**")
+        |> ArchTest.enforce_onion_rules(graph: graph)
+      end
+    end
   end
 
   describe "define_layers/1 struct" do
@@ -92,6 +117,22 @@ defmodule ArchTest.LayersTest do
       arch = Layers.define_layers(web: "A.**")
       assert %Layers{layers: layers} = arch
       assert Keyword.get(layers, :web) == "A.**"
+    end
+
+    test "allow_layer_dependency records an exception to direction rules" do
+      arch =
+        Layers.define_layers(web: "A.Web.**", context: "A.Context.**")
+        |> Layers.allow_layer_dependency(:context, :web)
+
+      assert {:context, :web} in arch.allowed_deps
+    end
+
+    test "public allow_layer_dependency helper is available from ArchTest" do
+      arch =
+        ArchTest.define_layers(web: "A.Web.**", context: "A.Context.**")
+        |> ArchTest.allow_layer_dependency(:context, :web)
+
+      assert {:context, :web} in arch.allowed_deps
     end
   end
 

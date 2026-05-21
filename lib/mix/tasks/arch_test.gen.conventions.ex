@@ -25,19 +25,19 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       Igniter.create_new_file(igniter, path, """
       defmodule #{inspect(module)} do
         use ExUnit.Case
-        use ArchTest
+        use ArchTest, app: #{inspect(app)}
         use ArchTest.Conventions
 
         test "no IO.puts in production code" do
-          no_io_puts_in(modules_matching("#{ns}.**"))
+          no_io_puts_in(modules_matching("#{ns}.**"), app: #{inspect(app)})
         end
 
         test "no dbg calls left in" do
-          no_dbg_in(modules_matching("#{ns}.**"))
+          no_dbg_in(modules_matching("#{ns}.**"), app: #{inspect(app)})
         end
 
         test "no bare raise strings" do
-          no_raise_string_in(modules_matching("#{ns}.**"))
+          no_raise_string_in(modules_matching("#{ns}.**"), app: #{inspect(app)})
         end
       end
       """)

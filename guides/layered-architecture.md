@@ -16,7 +16,7 @@ Layers are declared from **top** (most user-facing) to **bottom** (most infrastr
 test "architecture layers are respected" do
   define_layers(
     web:     "MyApp.Web.**",
-    context: "MyApp.**",
+    context: "MyApp.Context.**",
     repo:    "MyApp.Repo.**"
   )
   |> enforce_direction()
@@ -75,7 +75,7 @@ Both `define_layers/1` and `define_onion/1` return a struct you can refine befor
 ```elixir
 define_layers(
   web:     "MyApp.Web.**",
-  context: "MyApp.**",
+  context: "MyApp.Context.**",
   repo:    "MyApp.Repo.**"
 )
 |> allow_layer_dependency(:context, :web)   # context may call web (exception)
@@ -87,7 +87,7 @@ define_layers(
 ```elixir
 define_layers(
   web:     "MyApp.Web.**",
-  context: "MyApp.**",
+  context: "MyApp.Context.**",
   repo:    "MyApp.Repo.**"
 )
 |> layer_may_not_depend_on(:context, [:web])
@@ -103,22 +103,36 @@ Often you want to exclude test helpers from the layer check:
 ```elixir
 define_layers(
   web:     "MyApp.Web.**",
-  context: "MyApp.**",
+  context: "MyApp.Context.**",
   repo:    "MyApp.Repo.**"
 )
 |> enforce_direction()
 ```
 
-If your test modules live under `MyApp.Test.**`, they won't match any of the three layer patterns and will be ignored automatically. If they do match (e.g. `MyApp.**`), use `excluding/2` on the underlying module set before building layers, or place test modules in a namespace that doesn't overlap your layers.
+If your test modules live under `MyApp.Test.**`, they won't match any of the
+three layer patterns above and will be ignored automatically. Keep layer
+patterns non-overlapping where possible; if support modules overlap production
+namespaces, move them under a support namespace or use collector filters such as
+`exclude: ["MyApp.TestSupport.**"]` when enforcing the rule.
 
 ---
 
 ## Umbrella: scope to one app
 
+Prefer setting the app once in the test module:
+
+```elixir
+use ArchTest, app: :my_app
+```
+
+Then `define_layers/1`, `define_onion/1`, and their enforcement helpers use
+that app automatically. For one-off checks without `use ArchTest`, call
+`for_app/2` explicitly:
+
 ```elixir
 define_layers(
   web:     "MyApp.Web.**",
-  context: "MyApp.**",
+  context: "MyApp.Context.**",
   repo:    "MyApp.Repo.**"
 )
 |> ArchTest.Layers.for_app(:my_app)

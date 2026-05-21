@@ -29,6 +29,10 @@ defmodule MixTasksTest do
     Rewrite.Source.get(source, :content)
   end
 
+  defp assert_scoped_to_app(content, app \\ :my_app) do
+    assert content =~ "use ArchTest, app: #{inspect(app)}"
+  end
+
   # ---------------------------------------------------------------------------
   # Conditional compilation guard
   # ---------------------------------------------------------------------------
@@ -73,7 +77,7 @@ defmodule MixTasksTest do
     test "generated file uses ArchTest" do
       c = run_task(Mix.Tasks.ArchTest.Install) |> content("test/my_app_arch_test.exs")
 
-      assert c =~ "use ArchTest"
+      assert_scoped_to_app(c)
     end
 
     test "generated file includes cycle check" do
@@ -89,6 +93,7 @@ defmodule MixTasksTest do
         |> content("test/blog_engine_arch_test.exs")
 
       assert c =~ "defmodule BlogEngine.ArchTest"
+      assert_scoped_to_app(c, :blog_engine)
     end
   end
 
@@ -106,6 +111,7 @@ defmodule MixTasksTest do
       c = run_task(Mix.Tasks.ArchTest.Gen.Modulith) |> content("test/arch/modulith_arch_test.exs")
 
       assert c =~ "defmodule MyApp.Modulith.ArchTest"
+      assert_scoped_to_app(c)
     end
 
     test "defines slices with app namespace" do
@@ -139,6 +145,7 @@ defmodule MixTasksTest do
       c = run_task(Mix.Tasks.ArchTest.Gen.Layers) |> content("test/arch/layers_arch_test.exs")
 
       assert c =~ "defmodule MyApp.Layers.ArchTest"
+      assert_scoped_to_app(c)
     end
 
     test "defines web/context/repo layers with app namespace" do
@@ -146,7 +153,7 @@ defmodule MixTasksTest do
 
       assert c =~ "define_layers("
       assert c =~ ~s("MyApp.Web.**")
-      assert c =~ ~s("MyApp.**")
+      assert c =~ ~s("MyApp.Context.**")
       assert c =~ ~s("MyApp.Repo.**")
     end
 
@@ -171,6 +178,7 @@ defmodule MixTasksTest do
       c = run_task(Mix.Tasks.ArchTest.Gen.Freeze) |> content("test/arch/freeze_arch_test.exs")
 
       assert c =~ "defmodule MyApp.Freeze.ArchTest"
+      assert_scoped_to_app(c)
     end
 
     test "wraps assertion in ArchTest.Freeze.freeze" do
@@ -201,6 +209,7 @@ defmodule MixTasksTest do
       c = run_task(Mix.Tasks.ArchTest.Gen.Onion) |> content("test/arch/onion_arch_test.exs")
 
       assert c =~ "defmodule MyApp.Onion.ArchTest"
+      assert_scoped_to_app(c)
     end
 
     test "defines all four onion rings" do
@@ -234,6 +243,7 @@ defmodule MixTasksTest do
       c = run_task(Mix.Tasks.ArchTest.Gen.Naming) |> content("test/arch/naming_arch_test.exs")
 
       assert c =~ "defmodule MyApp.Naming.ArchTest"
+      assert_scoped_to_app(c)
     end
 
     test "bans Manager and God modules" do
@@ -250,6 +260,7 @@ defmodule MixTasksTest do
       assert c =~ "function_exported?(m, :__schema__, 1)"
       assert c =~ "should_reside_under("
       assert c =~ ~s("MyApp.**.Schemas")
+      assert c =~ "allow_empty: true"
     end
   end
 
@@ -269,6 +280,7 @@ defmodule MixTasksTest do
         |> content("test/arch/conventions_arch_test.exs")
 
       assert c =~ "defmodule MyApp.Conventions.ArchTest"
+      assert_scoped_to_app(c)
       assert c =~ "use ArchTest.Conventions"
     end
 
@@ -280,6 +292,7 @@ defmodule MixTasksTest do
       assert c =~ "no_io_puts_in("
       assert c =~ "no_dbg_in("
       assert c =~ "no_raise_string_in("
+      assert c =~ "app: :my_app"
     end
 
     test "scopes checks to app namespace" do
@@ -305,7 +318,7 @@ defmodule MixTasksTest do
       c = run_task(Mix.Tasks.ArchTest.Gen.Phoenix) |> content("test/arch/phoenix_arch_test.exs")
 
       assert c =~ "defmodule MyApp.Phoenix.ArchTest"
-      assert c =~ "use ArchTest"
+      assert_scoped_to_app(c)
       assert c =~ "use ArchTest.Conventions"
     end
 
@@ -313,6 +326,9 @@ defmodule MixTasksTest do
       c = run_task(Mix.Tasks.ArchTest.Gen.Phoenix) |> content("test/arch/phoenix_arch_test.exs")
 
       assert c =~ "define_layers("
+      assert c =~ ~s(web: "MyAppWeb.**")
+      assert c =~ ~s(app: "MyApp.**")
+      refute c =~ ~s(repo:    "MyApp.Repo")
       assert c =~ "enforce_direction()"
     end
 
@@ -334,6 +350,7 @@ defmodule MixTasksTest do
       assert c =~ ~s[modules_matching("MyApp.**.*Manager")]
       assert c =~ "no_io_puts_in("
       assert c =~ "no_dbg_in("
+      assert c =~ "app: :my_app"
     end
   end
 end

@@ -27,7 +27,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       Igniter.create_new_file(igniter, path, """
       defmodule #{inspect(module)} do
         use ExUnit.Case
-        use ArchTest
+        use ArchTest, app: #{inspect(app)}
 
         # Run: ARCH_TEST_UPDATE_FREEZE=true mix test to establish the baseline.
         # Commit test/arch_test_violations/ to version control.

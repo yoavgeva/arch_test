@@ -11,9 +11,9 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
 
         mix arch_test.gen.phoenix
 
-    Creates `test/arch/phoenix_arch_test.exs` combining layer direction
-    (web → context → repo), context isolation from the web layer, cycle
-    detection, naming rules, and code convention checks.
+    Creates `test/arch/phoenix_arch_test.exs` combining layer direction,
+    application isolation from the web layer, cycle detection, naming rules,
+    and code convention checks.
     """
 
     @impl Igniter.Mix.Task
@@ -26,15 +26,14 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       Igniter.create_new_file(igniter, path, """
       defmodule #{inspect(module)} do
         use ExUnit.Case
-        use ArchTest
+        use ArchTest, app: #{inspect(app)}
         use ArchTest.Conventions
 
-        # Layer direction: Web may only depend on Contexts; Contexts may not call Web
+        # Layer direction: Web may depend on app modules; app modules must not call Web
         test "web layer does not leak into contexts" do
           define_layers(
             web:     "#{ns}Web.**",
-            context: "#{ns}.**",
-            repo:    "#{ns}.Repo"
+            app:     "#{ns}.**"
           )
           |> enforce_direction()
         end
@@ -57,11 +56,11 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
 
         # Code conventions
         test "no IO.puts in production code" do
-          no_io_puts_in(modules_matching("#{ns}.**"))
+          no_io_puts_in(modules_matching("#{ns}.**"), app: #{inspect(app)})
         end
 
         test "no dbg calls left in" do
-          no_dbg_in(modules_matching("#{ns}.**"))
+          no_dbg_in(modules_matching("#{ns}.**"), app: #{inspect(app)})
         end
       end
       """)

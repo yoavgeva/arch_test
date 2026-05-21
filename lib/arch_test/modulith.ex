@@ -45,6 +45,54 @@ defmodule ArchTest.Modulith do
   end
 
   @doc """
+  Defines slices by capturing one namespace segment from existing modules.
+
+  The pattern must include one `(*)` segment. For example,
+  `"MyApp.(*)"` captures direct children like `MyApp.Orders` and creates
+  slices such as `orders: "MyApp.Orders"`. A wildcard can appear before the
+  capture, such as `"MyApp.*.(*)"`.
+
+  Options:
+  - `:app` — OTP application to inspect
+  - `:graph` — pre-built graph, useful in tests
+  - `:except` — module glob patterns to ignore
+  """
+  @spec define_slices_by(String.t(), keyword()) :: t()
+  def define_slices_by(pattern, opts \\ []) when is_binary(pattern) do
+    validate_capture_pattern!(pattern)
+
+    graph =
+      case Keyword.get(opts, :graph) do
+        nil -> Collector.build_graph(Keyword.get(opts, :app, :all), opts)
+        graph -> graph
+      end
+
+    except_patterns = List.wrap(Keyword.get(opts, :except, []))
+    regex = capture_regex(pattern)
+
+    slices =
+      graph
+      |> Map.keys()
+      |> Enum.map(&module_name/1)
+      |> Enum.reject(fn mod ->
+        Enum.any?(except_patterns, &ArchTest.Pattern.matches?(&1, mod))
+      end)
+      |> Enum.flat_map(fn mod ->
+        case captured_slice(regex, mod) do
+          {:ok, capture, root} ->
+            [{capture_to_slice_name(capture), root}]
+
+          :error ->
+            []
+        end
+      end)
+      |> Enum.uniq_by(fn {slice, _root} -> slice end)
+      |> Enum.sort_by(fn {slice, _root} -> slice end)
+
+    %__MODULE__{slices: slices, app: Keyword.get(opts, :app)}
+  end
+
+  @doc """
   Permits `from_slice` to call the public API (root module) of `to_slice`.
 
   Without this, cross-slice calls to internal sub-modules are always
@@ -70,13 +118,13 @@ defmodule ArchTest.Modulith do
 
   Rules:
   1. Module A (in slice X) calling Module B (in slice Y's internals) is a
-     violation, unless `allow_dependency(X, Y)` has been declared.
-  2. Even with `allow_dependency(X, Y)`, only the public root module of Y
-     may be called (not sub-modules).
+     violation. Internals are never callable from another slice.
+  2. Calls to another slice's public root module require
+     `allow_dependency(X, Y)`.
   """
-  @spec enforce_isolation(t()) :: :ok
-  def enforce_isolation(%__MODULE__{} = m) do
-    graph = Collector.build_graph(m.app || :all)
+  @spec enforce_isolation(t(), keyword()) :: :ok
+  def enforce_isolation(%__MODULE__{} = m, opts \\ []) do
+    graph = Keyword.get(opts, :graph) || Collector.build_graph(app_for(m, opts), opts)
     slice_info = build_slice_info(m.slices, graph)
 
     violations =
@@ -141,9 +189,9 @@ defmodule ArchTest.Modulith do
   Each slice is treated as a single node; a cycle exists when slice A
   depends on slice B which (transitively) depends on slice A.
   """
-  @spec should_be_free_of_cycles(t()) :: :ok
-  def should_be_free_of_cycles(%__MODULE__{} = m) do
-    graph = Collector.build_graph(m.app || :all)
+  @spec should_be_free_of_cycles(t(), keyword()) :: :ok
+  def should_be_free_of_cycles(%__MODULE__{} = m, opts \\ []) do
+    graph = Keyword.get(opts, :graph) || Collector.build_graph(app_for(m, opts), opts)
     slice_info = build_slice_info(m.slices, graph)
 
     # Build a slice-level dependency graph
@@ -196,9 +244,9 @@ defmodule ArchTest.Modulith do
       )
       |> should_not_depend_on_each_other()
   """
-  @spec should_not_depend_on_each_other(t()) :: :ok
-  def should_not_depend_on_each_other(%__MODULE__{} = m) do
-    graph = Collector.build_graph(m.app || :all)
+  @spec should_not_depend_on_each_other(t(), keyword()) :: :ok
+  def should_not_depend_on_each_other(%__MODULE__{} = m, opts \\ []) do
+    graph = Keyword.get(opts, :graph) || Collector.build_graph(app_for(m, opts), opts)
     slice_info = build_slice_info(m.slices, graph)
 
     violations =
@@ -253,7 +301,7 @@ defmodule ArchTest.Modulith do
   def all_modules_covered_by(%__MODULE__{} = m, namespace_pattern, opts \\ []) do
     graph =
       case Keyword.get(opts, :graph) do
-        nil -> Collector.build_graph(m.app || :all)
+        nil -> Collector.build_graph(app_for(m, opts), opts)
         g when is_map(g) -> g
       end
 
@@ -317,6 +365,10 @@ defmodule ArchTest.Modulith do
   # Private helpers
   # ------------------------------------------------------------------
 
+  defp app_for(%__MODULE__{} = m, opts) do
+    Keyword.get(opts, :app, m.app || :all)
+  end
+
   # Returns all modules belonging to a slice by name from the pre-built slice_info.
   defp slice_modules(slice_name, slice_info) do
     Enum.find_value(slice_info, [], fn {name, _root, all_mods} ->
@@ -363,6 +415,54 @@ defmodule ArchTest.Modulith do
 
   defp strip_elixir_prefix("Elixir." <> rest), do: rest
   defp strip_elixir_prefix(str), do: str
+
+  defp module_name(mod) do
+    mod
+    |> Atom.to_string()
+    |> strip_elixir_prefix()
+  end
+
+  defp validate_capture_pattern!(pattern) do
+    captures =
+      pattern
+      |> String.split(".")
+      |> Enum.count(&(&1 == "(*)"))
+
+    if captures != 1 do
+      raise ArgumentError, "define_slices_by/2 pattern must contain exactly one (*) segment"
+    end
+  end
+
+  defp capture_regex(pattern) do
+    pattern
+    |> String.split(".")
+    |> Enum.map_join("\\.", fn
+      "(*)" -> "([^.]+)"
+      "*" -> "[^.]+"
+      "**" -> "(?:[^.]+(?:\\.[^.]+)*)"
+      segment -> segment |> Regex.escape() |> String.replace("\\*", "[^.]*")
+    end)
+    |> then(&Regex.compile!("^#{&1}(?:\\..*)?$"))
+  end
+
+  defp captured_slice(regex, module_name) do
+    case Regex.run(regex, module_name, return: :index) do
+      [_whole, {capture_start, capture_length}] ->
+        capture = binary_part(module_name, capture_start, capture_length)
+        root = binary_part(module_name, 0, capture_start + capture_length)
+        {:ok, capture, root}
+
+      _ ->
+        :error
+    end
+  end
+
+  defp capture_to_slice_name(capture) do
+    capture
+    |> Macro.underscore()
+    |> String.replace(~r/[^a-z0-9_]/, "_")
+    |> String.to_atom()
+  end
 
   # Suggests the top-level namespace for an uncovered module (first two segments).
   defp slice_root_hint(mod) do

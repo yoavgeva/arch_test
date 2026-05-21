@@ -11,8 +11,8 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
 
         mix arch_test.install
 
-    Creates `test/<app>_arch_test.exs` with `use ArchTest` and a single
-    `should_be_free_of_cycles/1` test as a starting point.
+    Creates `test/<app>_arch_test.exs` with `use ArchTest, app: :<app>` and a
+    single `should_be_free_of_cycles/1` test as a starting point.
     """
 
     @impl Igniter.Mix.Task
@@ -24,7 +24,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       Igniter.create_new_file(igniter, path, """
       defmodule #{inspect(module)} do
         use ExUnit.Case
-        use ArchTest
+        use ArchTest, app: #{inspect(app)}
 
         test "no circular dependencies" do
           all_modules() |> should_be_free_of_cycles()

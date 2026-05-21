@@ -23,6 +23,9 @@ defmodule ArchTest.Metrics do
       ArchTest.Metrics.coupling("MyApp.Orders")
       # %{afferent: 3, efferent: 7, instability: 0.7}
 
+      ArchTest.Metrics.afferent("MyApp.Orders")
+      ArchTest.Metrics.efferent("MyApp.Orders")
+
       # Assert on metrics
       assert ArchTest.Metrics.instability("MyApp.Orders") < 0.5
   """
@@ -48,7 +51,7 @@ defmodule ArchTest.Metrics do
     subject = ModuleSet.new(pattern) |> ModuleSet.resolve(graph) |> MapSet.new()
 
     Enum.reduce(subject, %{}, fn mod, acc ->
-      metrics = compute_metrics(mod, graph, subject)
+      metrics = compute_metrics(mod, graph, MapSet.new([mod]))
       Map.put(acc, mod, metrics)
     end)
   end
@@ -57,7 +60,8 @@ defmodule ArchTest.Metrics do
   Returns coupling metrics for the given module (or namespace root).
 
   If a namespace pattern is given (e.g., `"MyApp.Orders"`), it computes
-  aggregate metrics treating all matching modules as a single package.
+  aggregate metrics treating the root and descendants as a single package.
+  Pass a module atom to measure only that exact module.
   """
   @spec coupling(String.t() | module(), keyword()) :: metric_map()
   def coupling(module_or_pattern, opts \\ []) do
@@ -69,7 +73,9 @@ defmodule ArchTest.Metrics do
           MapSet.new([m])
 
         pattern when is_binary(pattern) ->
-          ModuleSet.new(pattern) |> ModuleSet.resolve(graph) |> MapSet.new()
+          pattern
+          |> modules_for_binary_pattern(graph)
+          |> MapSet.new()
       end
 
     compute_package_metrics(mods, graph)
@@ -95,16 +101,76 @@ defmodule ArchTest.Metrics do
     coupling(module_or_pattern, opts).abstractness
   end
 
+  @doc """
+  Returns afferent coupling (`Ca`) for a module or namespace.
+  """
+  @spec afferent(String.t() | module(), keyword()) :: non_neg_integer()
+  def afferent(module_or_pattern, opts \\ []) do
+    coupling(module_or_pattern, opts).afferent
+  end
+
+  @doc """
+  Returns efferent coupling (`Ce`) for a module or namespace.
+  """
+  @spec efferent(String.t() | module(), keyword()) :: non_neg_integer()
+  def efferent(module_or_pattern, opts \\ []) do
+    coupling(module_or_pattern, opts).efferent
+  end
+
+  @doc """
+  Counts modules that depend directly on the given module.
+  """
+  @spec fan_in(module(), keyword()) :: non_neg_integer()
+  def fan_in(module, opts \\ []) when is_atom(module) do
+    opts
+    |> get_graph()
+    |> Enum.count(fn {_caller, deps} -> module in deps end)
+  end
+
+  @doc """
+  Counts direct dependencies of the given module that are present in the graph.
+  """
+  @spec fan_out(module(), keyword()) :: non_neg_integer()
+  def fan_out(module, opts \\ []) when is_atom(module) do
+    graph = get_graph(opts)
+    known_modules = MapSet.new(Map.keys(graph))
+
+    graph
+    |> Collector.dependencies_of(module)
+    |> Enum.count(&MapSet.member?(known_modules, &1))
+  end
+
+  @doc """
+  Returns the longest dependency path depth from the given module.
+  """
+  @spec dependency_depth(module(), keyword()) :: non_neg_integer()
+  def dependency_depth(module, opts \\ []) when is_atom(module) do
+    graph = get_graph(opts)
+    do_depth(graph, module, MapSet.new())
+  end
+
   # ------------------------------------------------------------------
   # Private helpers
   # ------------------------------------------------------------------
 
   defp get_graph(opts) do
     case Keyword.get(opts, :graph) do
-      nil -> Collector.build_graph(Keyword.get(opts, :app, :all))
+      nil -> Collector.build_graph(Keyword.get(opts, :app, :all), opts)
       graph -> graph
     end
   end
+
+  defp modules_for_binary_pattern(pattern, graph) do
+    if glob_pattern?(pattern) do
+      ModuleSet.new(pattern) |> ModuleSet.resolve(graph)
+    else
+      root = ModuleSet.new(pattern) |> ModuleSet.resolve(graph)
+      descendants = ModuleSet.new("#{pattern}.**") |> ModuleSet.resolve(graph)
+      Enum.uniq(root ++ descendants)
+    end
+  end
+
+  defp glob_pattern?(pattern), do: String.contains?(pattern, ["*", "?"])
 
   defp compute_metrics(mod, graph, subject_set) do
     ca = afferent_coupling(mod, graph, subject_set)
@@ -128,13 +194,12 @@ defmodule ArchTest.Metrics do
 
     ce =
       mods
-      |> Enum.count(fn mod ->
-        deps = Collector.dependencies_of(graph, mod)
-
-        Enum.any?(deps, fn dep ->
-          MapSet.member?(all_module_keys, dep) and not MapSet.member?(mods, dep)
-        end)
+      |> Enum.flat_map(&Collector.dependencies_of(graph, &1))
+      |> Enum.filter(fn dep ->
+        MapSet.member?(all_module_keys, dep) and not MapSet.member?(mods, dep)
       end)
+      |> Enum.uniq()
+      |> length()
 
     i = instability_value(ca, ce)
 
@@ -193,5 +258,21 @@ defmodule ArchTest.Metrics do
 
   defp average(list) do
     Enum.sum(list) / length(list)
+  end
+
+  defp do_depth(graph, module, visited) do
+    deps =
+      graph
+      |> Collector.dependencies_of(module)
+      |> Enum.reject(&MapSet.member?(visited, &1))
+
+    case deps do
+      [] ->
+        0
+
+      deps ->
+        next_visited = MapSet.put(visited, module)
+        1 + (deps |> Enum.map(&do_depth(graph, &1, next_visited)) |> Enum.max())
+    end
   end
 end

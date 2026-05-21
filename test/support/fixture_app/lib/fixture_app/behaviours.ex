@@ -8,8 +8,9 @@ defmodule FixtureApp.Behaviours do
 
   defmodule MyProtocol do
     @moduledoc "A simple protocol used in tests."
-    @fallback_to_any false
+
     defprotocol Content do
+      @fallback_to_any false
       @spec describe(t()) :: String.t()
       def describe(value)
     end

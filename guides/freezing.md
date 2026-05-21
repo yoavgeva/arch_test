@@ -32,6 +32,24 @@ test "domain doesn't depend on web" do
 end
 ```
 
+For a test module full of architecture assertions, enable auto-freeze once:
+
+```elixir
+defmodule MyApp.LegacyArchTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app, freeze: true
+
+  test "domain doesn't depend on web" do
+    modules_matching("MyApp.Domain.**")
+    |> should_not_depend_on(modules_matching("MyApp.Web.**"),
+      rule_id: "domain_web_deps")
+  end
+end
+```
+
+`rule_id:` is optional, but recommended for long-lived baselines because it
+keeps the baseline filename stable.
+
 On the first run with no baseline, all violations are reported as new and the test fails. That's expected — the next step is to establish the baseline.
 
 ---
@@ -119,9 +137,19 @@ Files: `test/arch_test_violations/web_domain.txt`, `test/arch_test_violations/no
 
 ## How the freeze key is matched
 
-Violations are compared as strings. The key format is `"CallerModule → CalleeModule"`. If a violation string appears in the baseline file, it is ignored. If it is not in the file, the test fails.
+ArchTest violations are compared as structured text keys derived from
+`%ArchTest.Violation{}`. For dependency rules the key includes fields such as
+`type`, `caller`, and `callee`; other rule types include their relevant module,
+path, or message fields. Assertion failures without violation structs, such as a
+module-count constraint, use normalized assertion text. If a key appears in the
+baseline file, it is ignored. If it is not in the file, the test fails.
 
 This means renaming a module *removes* it from the baseline and treats it as a new violation — which is correct, because the new name should not carry forward the old waiver.
+
+Auto-freeze generated rule ids include the test module, assertion name,
+assertion arguments, and scope options (`:app`, `:apps`, `:paths`, `:include`,
+`:exclude`). Empty-subject failures are not freezable; fix the pattern or pass
+`allow_empty: true` when an empty match is intentional.
 
 ---
 

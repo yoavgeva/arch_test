@@ -12,7 +12,7 @@ Everything works from compiled BEAM bytecode via OTP's `:xref`. No source parsin
 # mix.exs
 defp deps do
   [
-    {:arch_test, "~> 0.2", only: :test, runtime: false}
+    {:arch_test, "~> 0.3", only: :test, runtime: false}
   ]
 end
 ```
@@ -29,7 +29,7 @@ If you use [Igniter](https://hex.pm/packages/igniter), you can scaffold a file i
 
 | Command | What it generates |
 |---------|-------------------|
-| `mix igniter.install arch_test` | Basic arch test file with a cycle check |
+| `mix igniter.install arch_test` / `mix arch_test.install` | Basic arch test file with a cycle check |
 | `mix arch_test.gen.phoenix` | Opinionated Phoenix setup — layers + naming + conventions ([Phoenix directory structure](https://hexdocs.pm/phoenix/directory_structure.html) · [N-tier architecture](https://en.wikipedia.org/wiki/Multitier_architecture)) |
 | `mix arch_test.gen.layers` | [Classic web → context → repo layers](layered-architecture.md) ([N-tier architecture](https://en.wikipedia.org/wiki/Multitier_architecture)) |
 | `mix arch_test.gen.onion` | [Onion / hexagonal rings](layered-architecture.md#onion--hexagonal-architecture) ([Onion Architecture](https://jeffreypalermo.com/2008/07/the-onion-architecture-part-1/) · [Hexagonal / Ports & Adapters](https://alistair.cockburn.us/hexagonal-architecture/)) |
@@ -39,6 +39,9 @@ If you use [Igniter](https://hex.pm/packages/igniter), you can scaffold a file i
 | `mix arch_test.gen.freeze` | [Freeze baseline for gradual adoption](freezing.md) |
 
 Add Igniter as a dev dependency first: `{:igniter, "~> 0.7", only: [:dev, :test], runtime: false}`.
+Generated tests use `use ArchTest, app: :your_app`, so app-local helpers such as
+`all_modules/0` do not accidentally inspect dependencies or sibling umbrella
+apps.
 
 Or write the file by hand:
 
@@ -46,7 +49,7 @@ Or write the file by hand:
 # test/architecture_test.exs
 defmodule MyApp.ArchitectureTest do
   use ExUnit.Case
-  use ArchTest
+  use ArchTest, app: :my_app
 
   test "services don't call repos directly" do
     modules_matching("MyApp.**.*Service")
@@ -104,7 +107,7 @@ modules_matching("**.*Service*")       # contains Service anywhere
 # Shorthand for "MyApp.Orders.*"
 modules_in("MyApp.Orders")
 
-# Everything
+# Everything in the scoped app
 all_modules()
 
 # Custom predicate
@@ -174,7 +177,7 @@ modules_matching("MyApp.Web.**")
 
 # Count constraint
 modules_matching("MyApp.**.*God")
-|> should_have_module_count(max: 0)
+|> should_have_module_count(at_most: 0)
 ```
 
 ---
@@ -185,14 +188,30 @@ modules_matching("MyApp.**.*God")
 use ArchTest, app: :my_app
 ```
 
-This filters all module sets to only include modules belonging to `:my_app`.
+This scopes assertion, layer, onion, and modulith checks to `:my_app`. You can
+override the scope for one rule:
+
+```elixir
+modules_matching("OtherApp.**")
+|> should_be_free_of_cycles(app: :other_app)
+```
+
+Rules fail when the subject pattern matches no modules, which usually means a
+typo. Allow empty subjects only when that is the intended policy:
+
+```elixir
+modules_matching("MyApp.Legacy.**")
+|> should_not_depend_on(modules_matching("MyApp.NewCore.**"), allow_empty: true)
+```
 
 ---
 
 ## Next steps
 
+- [Migrating from 0.2 to 0.3](migrating-to-0.3.md) — upgrade checklist, breaking behavior notes, and before/after examples
 - [Layered Architecture](layered-architecture.md) — enforce layer direction or onion rules with `define_layers/1` and `define_onion/1`
 - [Modulith Rules](modulith-rules.md) — bounded-context isolation with `define_slices/1`
+- [Advanced Rules](advanced-rules.md) — app scoping, auto-freeze, import filters, call metadata, reusable rules, and PlantUML
 - [Freezing](freezing.md) — adopt gradually by baselining existing violations
 - `ArchTest.Conventions` — check for `IO.puts`, `dbg`, bare `raise`, and missing docs
 - `ArchTest.Metrics` — measure coupling, instability, and distance from the main sequence
