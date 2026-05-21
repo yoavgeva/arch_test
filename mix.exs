@@ -1,7 +1,7 @@
 defmodule ArchTest.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.3.1"
   @source_url "https://github.com/yoavgeva/arch_test"
 
   def project do
@@ -59,7 +59,8 @@ defmodule ArchTest.MixProject do
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
       },
       maintainers: ["Yoav Geva"],
-      files: ~w(lib guides cheatsheets .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
+      files:
+        ~w(lib guides cheatsheets test/arch_test/fixture_app_examples_test.exs test/support/fixture_app/lib test/support/fixture_app/docs test/support/fixture_app/README.md test/support/fixture_app/mix.exs .formatter.exs mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
@@ -70,13 +71,15 @@ defmodule ArchTest.MixProject do
       source_url: @source_url,
       extra_section: "GUIDES",
       extras: [
-        "README.md",
+        {"README.md", [filename: "readme", title: "ArchTest"]},
         "guides/getting-started.md",
         "guides/migrating-to-0.3.md",
         "guides/advanced-rules.md",
         "guides/layered-architecture.md",
         "guides/modulith-rules.md",
         "guides/freezing.md",
+        {"test/support/fixture_app/README.md",
+         [filename: "fixture-app-examples", title: "FixtureApp Architecture Examples"]},
         "cheatsheets/arch_test.cheatmd",
         "CHANGELOG.md",
         "LICENSE"
@@ -89,6 +92,9 @@ defmodule ArchTest.MixProject do
           "guides/layered-architecture.md",
           "guides/modulith-rules.md",
           "guides/freezing.md"
+        ],
+        Examples: [
+          "test/support/fixture_app/README.md"
         ],
         Cheatsheets: [
           "cheatsheets/arch_test.cheatmd"

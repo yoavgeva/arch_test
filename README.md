@@ -453,6 +453,10 @@ ignored, so commented-out edges do not accidentally allow dependencies.
 
 See [Advanced Rules](guides/advanced-rules.md) for full examples.
 
+For executable examples against a real compiled Mix project, see the
+[FixtureApp examples](test/support/fixture_app/README.md). They cover PlantUML,
+captured slices, call metadata, reusable rules, and metrics.
+
 ---
 
 ## Pattern reference

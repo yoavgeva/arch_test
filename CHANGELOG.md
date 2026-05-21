@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-05-21
+
+### Added
+
+- Added executable fixture-app architecture examples covering PlantUML
+  conformance, captured slices, function-level call metadata, reusable rules,
+  and graph metrics against real compiled BEAM files.
+- Included the fixture example docs, PlantUML diagram, and test module in the
+  Hex package, with the fixture README listed in HexDocs examples.
+
 ## [0.3.0] - 2026-05-21
 
 ### Added
