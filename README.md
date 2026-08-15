@@ -1,3 +1,5 @@
+
+
 # ArchTest
 
 [![CI](https://github.com/yoavgeva/arch_test/actions/workflows/ci.yml/badge.svg)](https://github.com/yoavgeva/arch_test/actions/workflows/ci.yml)
@@ -85,7 +87,7 @@ If you use [Igniter](https://hex.pm/packages/igniter), ArchTest provides generat
 Add Igniter as a dev dependency to use these:
 
 ```elixir
-{:igniter, "~> 0.7", only: [:dev, :test], runtime: false}
+{:igniter, "~> 0.7", only: [:dev, :test], optional: true, runtime: false}
 ```
 
 Generated files use `use ArchTest, app: :your_app` so `all_modules/0`,
