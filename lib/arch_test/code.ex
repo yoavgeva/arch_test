@@ -6,7 +6,7 @@ defmodule ArchTest.Code do
   # `MyApp.Repo.get!/2`. Reading starts at the modules a rule checks and follows their calls into the other
   # modules in scope, so a rule reads only the code it can reach.
 
-  alias ArchTest.Code.{Actors, Errors, Waits, Walker}
+  alias ArchTest.Code.{Actors, Errors, Signatures, Waits, Walker}
   alias ArchTest.Collector
 
   defstruct modules: %{}, functions: %{}, scope: MapSet.new()
@@ -40,7 +40,8 @@ defmodule ArchTest.Code do
           tails: Errors.tails(),
           dynamic: boolean(),
           actors: Actors.calls(),
-          waits: [Waits.wait()]
+          waits: [Waits.wait()],
+          signature: Signatures.t()
         }
   @type module_info :: %{
           file: String.t() | nil,
@@ -198,7 +199,7 @@ defmodule ArchTest.Code do
          impls: MapSet.new(Map.get(info, :impls, []), &elem(&1, 0)),
          hidden: hidden_in(binary),
          callbacks: callbacks_in(binary),
-         functions: functions(module, info.definitions),
+         functions: functions(module, info.definitions, booleans_in(binary)),
          routes: routes_in(info.definitions)
        }}
     else
@@ -233,6 +234,21 @@ defmodule ArchTest.Code do
     else
       _ -> nil
     end
+  end
+
+  # The positions each function's spec types `boolean()`.
+  defp booleans_in(binary) do
+    case Code.Typespec.fetch_specs(binary) do
+      {:ok, specs} -> Map.new(specs, fn {key, types} -> {key, boolean_positions(types)} end)
+      :error -> %{}
+    end
+  end
+
+  defp boolean_positions(types) do
+    for {:type, _, :fun, [{:type, _, :product, args}, _result]} <- types,
+        {{:type, _, :boolean, []}, position} <- Enum.with_index(args),
+        into: MapSet.new(),
+        do: position
   end
 
   # The functions marked `@doc false`, from the Docs chunk the compiler writes.
@@ -272,7 +288,20 @@ defmodule ArchTest.Code do
     end
   end
 
-  defp functions(module, definitions) do
+  defp functions(module, definitions, booleans) do
+    defaults =
+      for {{name, _arity}, kind, _meta, [{_, _, _, {:super, _, args}}]} <- definitions,
+          kind in [:def, :defp] and is_list(args),
+          reduce: %{} do
+        acc ->
+          Map.update(
+            acc,
+            {name, length(args)},
+            Signatures.defaults(args),
+            &Map.merge(&1, Signatures.defaults(args))
+          )
+      end
+
     locals =
       for {{name, arity}, kind, _meta, _clauses} <- definitions,
           kind in [:def, :defp],
@@ -302,7 +331,13 @@ defmodule ArchTest.Code do
          tails: Errors.tails(clauses, module, locals),
          dynamic: Errors.dynamic?(clauses),
          actors: Actors.calls(clauses, module, locals),
-         waits: Waits.unbounded(clauses, module, name, arity, locals)
+         waits: Waits.unbounded(clauses, module, name, arity, locals),
+         signature:
+           Signatures.of(
+             clauses,
+             Map.get(booleans, {name, arity}, MapSet.new()),
+             Map.get(defaults, {name, arity}, %{})
+           )
        }}
     end
   end

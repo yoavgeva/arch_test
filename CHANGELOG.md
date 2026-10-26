@@ -30,10 +30,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `receive` without `after`, and `:gen_tcp`, `:ssl` and `:httpc` calls that
   wait forever by default. A process's own receive loop, and a receive that
   takes the `:DOWN` of the process it waits on, pass.
-- `no_io_in_transactions/2`, `no_swallowed_errors/2` and
-  `no_unbounded_waits/2` are part of `ArchTest.Recommended`;
-  `writes_are_authorized/2`, which needs a project's policy and public
-  endpoints, isn't.
+- `ArchTest.API`, rules about what public functions take and return:
+  - `no_flag_arguments/2` flags boolean parameters a function branches on.
+  - `typed_identifiers/2` flags functions taking two or more `*_id`
+    parameters, which a call can swap.
+  - `no_stringly_typed_choices/2` flags clause heads or a `case` matching
+    three or more strings, other than a parser's.
+  - `no_alternative_return_types/2` flags options that change the kind of
+    value a function returns, from Elixir's design anti-patterns.
+- `no_io_in_transactions/2`, `no_swallowed_errors/2`, `no_unbounded_waits/2`,
+  `no_flag_arguments/2`, `no_stringly_typed_choices/2` and
+  `no_alternative_return_types/2` are part of `ArchTest.Recommended`;
+  `writes_are_authorized/2` and `typed_identifiers/2`, which need a project's
+  own judgement, aren't.
 
 ### Changed
 

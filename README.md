@@ -24,6 +24,7 @@ Architecture and design rules as tests. Enforced from bytecode.
 | `ArchTest.Conventions` | Ban `IO.puts`, `dbg`, bare `raise`, and more |
 | `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1`, I/O in transactions, authorized writes |
 | `ArchTest.Processes` | One interface per process, GenServers with a reason to exist, supervised processes, waits with limits |
+| `ArchTest.API` | No flag arguments, no swappable ids, choices as atoms, one return type per function |
 | `ArchTest.TestCode` | Tests that use their subject, mock only I/O, don't sleep, and keep async tests isolated |
 | `ArchTest.Guardrails` | No silenced warnings, no stubs, nothing public only for tests, no swallowed errors |
 | `ArchTest.Recommended` | The design rules worth holding any project to, as one test |
@@ -446,6 +447,50 @@ See the [processes guide](guides/processes.md).
 
 ---
 
+
+## API
+
+`ArchTest.API` checks what public functions take and return:
+
+```elixir
+defmodule MyApp.APITest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.API
+
+  test "no flag arguments" do
+    no_flag_arguments(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "choices are atoms" do
+    no_stringly_typed_choices(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "options don't change what a function returns" do
+    no_alternative_return_types(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "billing ids can't be swapped" do
+    typed_identifiers(modules_matching("MyApp.Billing.**"), app: :my_app)
+  end
+end
+```
+
+- **`no_flag_arguments`** flags boolean parameters a public function branches
+  on, as in `render(text, true)`: split the function, or take an atom.
+- **`no_stringly_typed_choices`** flags clause heads or a `case` matching three
+  or more strings. Parse the string into an atom where it enters, once.
+- **`no_alternative_return_types`** flags options that change the kind of
+  value returned, such as `parse(text, discard_rest: true)` returning an
+  integer instead of a tuple.
+- **`typed_identifiers`** flags public functions taking two or more `*_id`
+  parameters, which a call can swap. Point it at code where a mix-up costs
+  most.
+
+See the [API guide](guides/api.md).
+
+---
+
 ## Test code
 
 `ArchTest.TestCode` checks your tests against your code. ExUnit compiles test
@@ -539,7 +584,8 @@ end
 
 `ArchTest.Recommended` runs the design rules worth holding any project to —
 N+1 queries, GenServer init, I/O in transactions, process interfaces and
-supervision, waits with limits, the test rules and the guardrails — and reports what each finds in one test:
+supervision, waits with limits, flag arguments, string choices, alternative
+return types, the test rules and the guardrails — and reports what each finds in one test:
 
 ```elixir
 test "recommended design rules" do

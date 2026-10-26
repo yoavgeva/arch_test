@@ -270,6 +270,25 @@ processes_are_supervised(modules_matching("MyApp.**"), app: :my_app)
 no_unbounded_waits(modules_matching("MyApp.**"), app: :my_app)
 ```
 
+## API
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.API
+
+# no render(text, true): split the function, or take an atom
+no_flag_arguments(modules_matching("MyApp.**"), app: :my_app)
+
+# no case on "standard" | "express" | "overnight": parse to atoms once
+no_stringly_typed_choices(modules_matching("MyApp.**"), app: :my_app)
+
+# no option that turns a tuple into a bare value
+no_alternative_return_types(modules_matching("MyApp.**"), app: :my_app)
+
+# no transfer(from_id, to_id, amount) where a swap runs
+typed_identifiers(modules_matching("MyApp.Billing.**"), app: :my_app)
+```
+
 ## Test Code
 
 ```elixir

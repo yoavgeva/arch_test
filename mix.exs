@@ -81,6 +81,7 @@ defmodule ArchTest.MixProject do
         "guides/freezing.md",
         "guides/effects.md",
         "guides/processes.md",
+        "guides/api.md",
         "guides/test-code.md",
         "guides/design-rule-examples.md",
         {"test/support/fixture_app/README.md",
@@ -99,6 +100,7 @@ defmodule ArchTest.MixProject do
           "guides/freezing.md",
           "guides/effects.md",
           "guides/processes.md",
+          "guides/api.md",
           "guides/test-code.md",
           "guides/design-rule-examples.md"
         ],
@@ -114,6 +116,14 @@ defmodule ArchTest.MixProject do
         "Architecture Patterns": [ArchTest.Layers, ArchTest.Modulith],
         "Data Collection": [ArchTest.Collector, ArchTest.Call, ArchTest.Pattern],
         "Advanced Features": [ArchTest.Freeze, ArchTest.Metrics, ArchTest.Conventions],
+        "Design Rules": [
+          ArchTest.Effects,
+          ArchTest.Processes,
+          ArchTest.API,
+          ArchTest.TestCode,
+          ArchTest.Guardrails,
+          ArchTest.Recommended
+        ],
         "Diagram Conformance": [ArchTest.PlantUML],
         Internals: [ArchTest.Rule, ArchTest.Violation]
       ]

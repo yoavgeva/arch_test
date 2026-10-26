@@ -1,6 +1,7 @@
 # Design Rule Examples
 
-Every design rule of `ArchTest.Effects`, `ArchTest.Processes`, `ArchTest.TestCode` and `ArchTest.Guardrails`, with
+Every design rule of `ArchTest.Effects`, `ArchTest.Processes`, `ArchTest.API`, `ArchTest.TestCode` and
+`ArchTest.Guardrails`, with
 code it flags, marked `# ✗`, and under **Fixed** the files that change to fix it. The examples are a small `Shop` app
 whose `Shop.Repo` is an Ecto repo. A test compiles every example and runs its rule on it, so they show what the rules
 really do.
@@ -375,6 +376,137 @@ defmodule Shop.Prices do
       {:exit, :timeout} -> []
     end)
   end
+end
+```
+
+</details>
+
+## API
+
+### `no_flag_arguments`
+
+`ArchTest.API.no_flag_arguments(modules_matching("Shop.**"))`
+
+A boolean that picks what a function does means it does two things, and a call like `render(text, true)` doesn't
+say which.
+
+```elixir
+defmodule Shop.Receipt do
+  # ✗ what does true mean at the call?
+  def render(text, html) when is_boolean(html) do
+    if html, do: "<p>" <> text <> "</p>", else: String.trim(text)
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Receipt do
+  def render_html(text), do: "<p>" <> text <> "</p>"
+  def render_text(text), do: String.trim(text)
+end
+```
+
+</details>
+
+### `typed_identifiers`
+
+`ArchTest.API.typed_identifiers(modules_matching("Shop.**"))`
+
+Two account ids are both integers, so a call that swaps them moves the money the wrong way.
+
+```elixir
+defmodule Shop.Transfers do
+  alias Shop.Repo
+
+  # ✗ transfer(to, from, amount) runs too
+  def transfer(from_account_id, to_account_id, amount),
+    do: Repo.insert({:transfer, from_account_id, to_account_id, amount})
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Account do
+  defstruct [:id, :balance]
+end
+```
+
+```elixir
+defmodule Shop.Transfers do
+  alias Shop.{Account, Repo}
+
+  def transfer(%Account{} = from, %Account{} = to, amount),
+    do: Repo.insert({:transfer, from.id, to.id, amount})
+end
+```
+
+</details>
+
+### `no_stringly_typed_choices`
+
+`ArchTest.API.no_stringly_typed_choices(modules_matching("Shop.**"))`
+
+Three strings matched in a `case` are an atom in disguise: a typo compiles, and nothing lists the choices.
+
+```elixir
+defmodule Shop.Shipping do
+  def days(speed) do
+    # ✗ "expres" compiles too
+    case speed do
+      "standard" -> 5
+      "express" -> 2
+      "overnight" -> 1
+    end
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Shipping do
+  def parse_speed("standard"), do: {:ok, :standard}
+  def parse_speed("express"), do: {:ok, :express}
+  def parse_speed("overnight"), do: {:ok, :overnight}
+  def parse_speed(_other), do: :error
+
+  def days(:standard), do: 5
+  def days(:express), do: 2
+  def days(:overnight), do: 1
+end
+```
+
+</details>
+
+### `no_alternative_return_types`
+
+`ArchTest.API.no_alternative_return_types(modules_matching("Shop.**"))`
+
+A function whose options change what it returns makes every caller check which kind of value came back.
+
+```elixir
+defmodule Shop.Quantity do
+  def parse(text, options \\ []) do
+    {quantity, rest} = Integer.parse(text)
+    # ✗ an integer, or a tuple, depending on an option
+    if Keyword.get(options, :discard_rest, false), do: quantity, else: {quantity, rest}
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Quantity do
+  def parse(text) do
+    {quantity, _rest} = Integer.parse(text)
+    quantity
+  end
+
+  def parse_with_rest(text), do: Integer.parse(text)
 end
 ```
 
