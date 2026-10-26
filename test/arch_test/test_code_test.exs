@@ -125,6 +125,19 @@ defmodule ArchTest.TestCodeTest do
          def discount(code), do: Shopify.create_price_rule(code)
        end
 
+       defmodule TestFixture.Adapter do
+         @callback fetch(term()) :: term()
+       end
+
+       defmodule TestFixture.HttpAdapter do
+         @behaviour TestFixture.Adapter
+         def fetch(request), do: request
+       end
+
+       defmodule TestFixture.Fetcher do
+         def get(request), do: TestFixture.HttpAdapter.fetch(request)
+       end
+
        defmodule TestFixture.Paying do
          def pay(code), do: TestFixture.Promotions.discount(code)
        end
@@ -346,7 +359,7 @@ defmodule ArchTest.TestCodeTest do
 
       test "renders a badge" do
         assigns = %{}
-        assert ~H"<TestFixture.Components.badge label=\"new\" />"
+        assert ~H|<TestFixture.Components.badge label="new" />|
       end
     end
     """)
@@ -373,11 +386,26 @@ defmodule ArchTest.TestCodeTest do
                end)
       end
 
+      test "keeps a slow step for later" do
+        steps = [fn -> Process.sleep(50) end]
+        assert length(steps) == 1
+      end
+
       test "waits in a loop" do
         Enum.each(1..2, fn _step -> Process.sleep(10) end)
       end
 
       defp start_peer(fun), do: fun
+    end
+    """)
+
+    write_test("test/test_fixture/adapter_test.exs", """
+    defmodule TestFixture.AdapterTest do
+      use ExUnit.Case, async: true
+
+      test "fetches through the adapter" do
+        assert TestFixture.Fetcher.get(1) == 1
+      end
     end
     """)
 
@@ -445,7 +473,7 @@ defmodule ArchTest.TestCodeTest do
                   "which is too short on a slow machine and slows every run"},
                {TestFixture.CheckoutTest, 23,
                 ~s(test "formats" sleeps with :timer.sleep/1, which is too short on a slow machine and slows every run)},
-               {TestFixture.SlowPeerTest, 12,
+               {TestFixture.SlowPeerTest, 17,
                 ~s(test "waits in a loop" sleeps with Process.sleep/1, ) <>
                   "which is too short on a slow machine and slows every run"}
              ]

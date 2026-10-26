@@ -330,7 +330,8 @@ defmodule ArchTest.TestCode do
   defp reach([{key, follow_names?} | rest], seen, target, {code, index} = graph) do
     info = code.functions[key]
 
-    if MapSet.member?(info.references, target) do
+    # A behaviour is used through its implementations.
+    if MapSet.member?(info.references, target) or target in Code.behaviours(code, elem(key, 0)) do
       true
     else
       called =

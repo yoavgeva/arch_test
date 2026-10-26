@@ -172,6 +172,22 @@ defmodule ArchTest.TestSource do
     labelled(body, "#{name}/#{length(args)}", state)
   end
 
+  defp walk({:fn, _, clauses}, state),
+    do: %{walk(clauses, %{state | callback: true}) | callback: state.callback}
+
+  # A HEEx template's remote components, as `<MyAppWeb.Components.badge />`, name their modules.
+  defp walk({:sigil_H, _, [{:<<>>, _, parts} | _]}, state) do
+    named =
+      for part <- parts,
+          is_binary(part),
+          [_, path] <- Regex.scan(~r/<\.?((?:[A-Z]\w*\.)+)[a-z_]\w*/, part),
+          segments =
+            path |> String.trim_trailing(".") |> String.split(".") |> Enum.map(&String.to_atom/1),
+          do: resolve({:__aliases__, [], segments}, state)
+
+    %{state | references: named ++ state.references}
+  end
+
   defp walk({:|>, _, [left, right]}, state), do: call(right, 1, walk(left, state))
 
   defp walk({:&, _, [{:/, _, [{{:., _, [target, name]}, _, []}, arity]}]}, state)
@@ -189,19 +205,6 @@ defmodule ArchTest.TestSource do
   defp walk({name, _, args} = node, state)
        when is_atom(name) and is_list(args) and name != :__aliases__,
        do: call(node, 0, state)
-
-  # A HEEx template's remote components, as `<MyAppWeb.Components.badge />`, name their modules.
-  defp walk({:sigil_H, _, [{:<<>>, _, parts} | _]}, state) do
-    named =
-      for part <- parts,
-          is_binary(part),
-          [_, path] <- Regex.scan(~r/<\.?((?:[A-Z]\w*\.)+)[a-z_]\w*/, part),
-          segments =
-            path |> String.trim_trailing(".") |> String.split(".") |> Enum.map(&String.to_atom/1),
-          do: resolve({:__aliases__, [], segments}, state)
-
-    %{state | references: named ++ state.references}
-  end
 
   defp walk({:__aliases__, _, _} = alias, state),
     do: %{state | references: [resolve(alias, state) | state.references]}
@@ -265,15 +268,12 @@ defmodule ArchTest.TestSource do
     end
   end
 
-  # A function given to a call other than `Enum`'s or `Stream`'s runs as a callback, in a fake, a server or another
-  # process, rather than in the test's own flow.
+  # A function the test makes runs as a callback, in a fake, a server or another process, rather than in the test's
+  # own flow, unless it's given to `Enum` or `Stream`, which run it right there.
   defp walk_args(args, module, state) do
     Enum.reduce(args, state, fn
-      {:fn, _, _} = fun, acc when module not in [Enum, Stream] ->
-        %{walk(fun, %{acc | callback: true}) | callback: acc.callback}
-
-      arg, acc ->
-        walk(arg, acc)
+      {:fn, _, clauses}, acc when module in [Enum, Stream] -> walk(clauses, acc)
+      arg, acc -> walk(arg, acc)
     end)
   end
 
