@@ -53,8 +53,14 @@ defmodule ArchTest.Guardrails do
     :terminate_child,
     :unlink,
     :demonitor,
-    :disconnect
+    :disconnect,
+    :rm,
+    :rm_rf,
+    :rmdir
   ]
+  # Functions that clean up, where an error left behind has nothing to tell.
+  @cleanups [:terminate, :close, :stop, :shutdown, :dispose]
+  @cleanup_prefixes ["cleanup", "clean_up", "clear"]
 
   @doc false
   defmacro __using__(_opts) do
@@ -140,8 +146,9 @@ defmodule ArchTest.Guardrails do
     violations =
       for module <- modules,
           Mix.Task not in Code.behaviours(code, module),
-          {key, info} <- Code.functions_of(code, module),
+          {{_, name, _} = key, info} <- Code.functions_of(code, module),
           not info.injected,
+          not cleanup?(name),
           violation <- swallowed(code, key, info, fails?) ++ ignored(code, key, info, fails?),
           do: violation
 
@@ -202,7 +209,8 @@ defmodule ArchTest.Guardrails do
           MapSet.member?(hidden, {name, arity}),
           not MapSet.member?(impls, {name, arity}) and
             not MapSet.member?(callbacks, {name, arity}),
-          MapSet.member?(tested, key) and not MapSet.member?(called, key) do
+          MapSet.member?(tested, key) and not MapSet.member?(called, key),
+          not another_signature?(info, key, hidden) do
         Rules.violation(code, "no_functions_only_tests_call", key,
           line: info.line,
           message: "is public only for tests: it's marked @doc false, and only tests call it",
@@ -213,6 +221,18 @@ defmodule ArchTest.Guardrails do
       end
 
     Rules.report(violations, "no_functions_only_tests_call")
+  end
+
+  # Whether the function is another signature of a documented one: it calls a function of the same name and module
+  # that isn't `@doc false`, as `insert(changeset, opts)` calling `insert(name, changeset, opts)` does.
+  defp another_signature?(info, {module, name, arity}, hidden) do
+    Enum.any?(info.calls, fn
+      %{target: {^module, ^name, other}} ->
+        other != arity and not MapSet.member?(hidden, {name, other})
+
+      _call ->
+        false
+    end)
   end
 
   # Only the project's own sources: not a dependency's, as a module a dependency's macro generates points to.
@@ -282,6 +302,9 @@ defmodule ArchTest.Guardrails do
       )
     end
   end
+
+  defp cleanup?(name),
+    do: name in @cleanups or String.starts_with?(Atom.to_string(name), @cleanup_prefixes)
 
   # Whether a call can fail in the outside world, other than in releasing something: it raises or, for an error
   # handler, returns `{:error, _}`, and reaches I/O, or a module chosen at runtime, which may be anything.

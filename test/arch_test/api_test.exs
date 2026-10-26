@@ -100,6 +100,15 @@ defmodule ArchTest.APITest do
          def size(context), do: context[:size] || 10
          def limit(opts), do: Keyword.get(opts, :limit) || [10]
 
+         def files(opts) do
+           mine = ["a.txt"]
+           if opts[:only_mine], do: mine, else: ["b.txt" | mine]
+         end
+
+         def merged(request, opts) do
+           if opts[:plug], do: %{request | adapter: :plug}, else: request
+         end
+
          def find(map, key, opts) do
            if Keyword.get(opts, :required, false) do
              with :error <- Map.fetch(map, key), do: {:error, :missing}
@@ -107,6 +116,45 @@ defmodule ArchTest.APITest do
              {:ok, Map.get(map, key)}
            end
          end
+       end
+       """},
+      {"lib/api_fixture/vocabulary.ex",
+       """
+       defmodule ApiFixture.Vocabulary do
+         def parse_size("small"), do: 1
+         def parse_size("medium"), do: 2
+         def parse_size("large"), do: 3
+
+         def digest("MD5"), do: {:ok, :md5, false}
+         def digest("SHA"), do: {:ok, :sha, true}
+         def digest("SHA-256"), do: {:ok, :sha256, true}
+         def digest(_other), do: :error
+
+         def closing("("), do: ")"
+         def closing("["), do: "]"
+         def closing("{"), do: "}"
+
+         def title("index.html"), do: "Home"
+         def title("about.html"), do: "About"
+         def title("contact.html"), do: "Contact"
+
+         def url(""), do: "app://home"
+         def url("/new"), do: "app://new"
+         def url("/settings"), do: "app://settings"
+
+         def __components__, do: %{button: %{attrs: [%{name: :size, values: ~w(small medium large)}]}}
+
+         def size_class("small"), do: "text-sm"
+         def size_class("medium"), do: "text-base"
+         def size_class("large"), do: "text-lg"
+       end
+
+       defmodule ApiFixture.Component do
+         @behaviour Phoenix.LiveComponent
+
+         def handle_event("save", _params, socket), do: {:noreply, socket}
+         def handle_event("delete", _params, socket), do: {:noreply, socket}
+         def handle_event("archive", _params, socket), do: {:noreply, socket}
        end
        """},
       {"lib/api_fixture/live.ex",

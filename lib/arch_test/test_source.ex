@@ -11,7 +11,9 @@ defmodule ArchTest.TestSource do
           target: {module() | :local, atom(), arity()},
           line: pos_integer() | nil,
           label: String.t(),
-          argument: atom() | integer() | nil
+          argument: atom() | integer() | nil,
+          key_module: module() | nil,
+          callback: boolean()
         }
   @type mock :: %{
           module: module(),
@@ -120,6 +122,7 @@ defmodule ArchTest.TestSource do
       references: [],
       mocks: [],
       imports: [],
+      callback: false,
       done: [],
       defmocks: []
     }
@@ -169,6 +172,22 @@ defmodule ArchTest.TestSource do
     labelled(body, "#{name}/#{length(args)}", state)
   end
 
+  defp walk({:fn, _, clauses}, state),
+    do: %{walk(clauses, %{state | callback: true}) | callback: state.callback}
+
+  # A HEEx template's remote components, as `<MyAppWeb.Components.badge />`, name their modules.
+  defp walk({:sigil_H, _, [{:<<>>, _, parts} | _]}, state) do
+    named =
+      for part <- parts,
+          is_binary(part),
+          [_, path] <- Regex.scan(~r/<\.?((?:[A-Z]\w*\.)+)[a-z_]\w*/, part),
+          segments =
+            path |> String.trim_trailing(".") |> String.split(".") |> Enum.map(&String.to_atom/1),
+          do: resolve({:__aliases__, [], segments}, state)
+
+    %{state | references: named ++ state.references}
+  end
+
   defp walk({:|>, _, [left, right]}, state), do: call(right, 1, walk(left, state))
 
   defp walk({:&, _, [{:/, _, [{{:., _, [target, name]}, _, []}, arity]}]}, state)
@@ -215,7 +234,7 @@ defmodule ArchTest.TestSource do
 
         if module in @mock_libraries,
           do: mocking(name, args, meta, state),
-          else: walk(args, state)
+          else: walk_args(args, module, state)
     end
   end
 
@@ -245,9 +264,27 @@ defmodule ArchTest.TestSource do
 
       walk(List.delete_at(args, position), %{state | mocks: [mock | state.mocks]})
     else
-      _ -> walk(args, state)
+      _ -> walk_args(args, :local, state)
     end
   end
+
+  # A function the test makes runs as a callback, in a fake, a server or another process, rather than in the test's
+  # own flow, unless it's given to `Enum` or `Stream`, which run it right there.
+  defp walk_args(args, module, state) do
+    Enum.reduce(args, state, fn
+      {:fn, _, clauses}, acc when module in [Enum, Stream] -> walk(clauses, acc)
+      arg, acc -> walk(arg, acc)
+    end)
+  end
+
+  # The module a key names, as `{Step, :version}` and `Step` do: state a test file's own module owns.
+  defp key_module([{:__aliases__, _, _} = alias | _], state), do: resolve(alias, state)
+  defp key_module([{{:__aliases__, _, _} = alias, _} | _], state), do: resolve(alias, state)
+
+  defp key_module([{:{}, _, [{:__aliases__, _, _} = alias | _]} | _], state),
+    do: resolve(alias, state)
+
+  defp key_module(_args, _state), do: nil
 
   defp defmock([name, options], state) when is_list(options) do
     behaviours = options |> Keyword.get(:for, []) |> List.wrap() |> Enum.map(&resolve(&1, state))
@@ -265,12 +302,16 @@ defmodule ArchTest.TestSource do
         _ -> nil
       end
 
-    %{
-      state
-      | calls: [
-          %{target: target, line: line, label: state.label, argument: argument} | state.calls
-        ]
+    call = %{
+      target: target,
+      line: line,
+      label: state.label,
+      argument: argument,
+      key_module: key_module(args, state),
+      callback: state.callback
     }
+
+    %{state | calls: [call | state.calls]}
   end
 
   defp finish(state) do

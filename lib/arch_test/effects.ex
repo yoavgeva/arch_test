@@ -97,7 +97,7 @@ defmodule ArchTest.Effects do
   }
   # Names of functions that change something rather than read it, such as `create_user/1` or `Req.post!/2`.
   @commands ~w(create insert update delete save put upsert remove send post patch publish broadcast notify enqueue
-               schedule write store persist destroy archive mark set add append push register subscribe)
+               schedule write store persist destroy archive mark set add append push register subscribe copy purge)
 
   @doc false
   defmacro __using__(_opts) do
@@ -228,7 +228,15 @@ defmodule ArchTest.Effects do
   - it gives the user asking to the call that writes: the current user or scope, as `conn.assigns.current_user`,
     `socket.assigns.current_scope`, `Guardian.Plug.current_resource(conn)` or a value made from them, for the code
     it calls to scope the change to;
-  - or it, or one of its controller's plugs, calls a policy: `Bodyguard`, `Canada`, or a module given as `policy:`.
+  - the write runs in a function it gives to a helper that reads the user first, as
+    `with_own_post(conn, id, fn post -> ... end)` checking the post's owner does;
+  - it's a LiveView event that writes to a record the socket's assigns hold, as `socket.assigns.post`, and the
+    LiveView's `mount/3` or `handle_params/3` loads records for the user asking, or the LiveComponent's `update/2`
+    is given the user by its parent;
+  - it, one of its controller's plugs, every router pipeline to it, or every `live_session` `on_mount` hook to its
+    LiveView, calls a policy: `Bodyguard`, `Canada`, or a module given as `policy:`;
+  - or every route to it is a GET or HEAD: a request to read, so what it writes is bookkeeping, as a cache or a
+    view count is.
 
   Otherwise anyone who can reach the endpoint can change any record whose id they send.
 
@@ -246,8 +254,9 @@ defmodule ArchTest.Effects do
     violations =
       for module <- modules,
           endpoint <- endpoints(code, module),
+          not reads_only?(routes, endpoint),
           not checks_policy?(code, endpoint, policies),
-          not routed_through_policy?(routes, endpoint, policies),
+          not routed_through_policy?(routes, endpoint, policies, code),
           {call, path} <- List.wrap(unchecked_write(code, effects, endpoint)) do
         Rules.violation(code, "writes_are_authorized", endpoint,
           line: call.line,
@@ -356,43 +365,73 @@ defmodule ArchTest.Effects do
     routers = Enum.filter(code.scope, &String.ends_with?(Atom.to_string(&1), "Router"))
     router_code = Code.load(routers, opts)
 
-    by_action =
-      for {router, %{routes: routes}} <- router_code.modules, route <- routes, reduce: %{} do
-        acc ->
-          pipelines = Enum.map(route.pipe_through, &{router, &1, 2})
-          Map.update(acc, {route.controller, route.action}, [pipelines], &[pipelines | &1])
-      end
+    routes =
+      for {router, %{routes: routes}} <- router_code.modules,
+          route <- routes,
+          do: %{route | pipe_through: Enum.map(route.pipe_through, &{router, &1, 2})}
 
-    {by_action, router_code}
+    {routes, router_code}
   end
 
-  # Whether every route to a controller action goes through a pipeline that calls a policy, as `pipe_through
-  # :require_admin` does when its plug is one.
-  defp routed_through_policy?({by_action, router_code}, {module, name, _arity}, policies) do
-    case Map.get(by_action, {module, name}, []) do
+  # The routes to an endpoint: to a controller action, or to any action of a LiveView, whose events all arrive over
+  # the connection a route opened.
+  defp routes_to(routes, {module, :handle_event, 3}),
+    do: Enum.filter(routes, &(&1.controller == module))
+
+  defp routes_to(routes, {module, name, _arity}),
+    do: Enum.filter(routes, &(&1.controller == module and &1.action == name))
+
+  # A controller action every route reaches with GET or HEAD: a request to read, so what it writes is the server's
+  # own bookkeeping, as a cache or a view count is, rather than a change the user asks for.
+  defp reads_only?({routes, _router_code}, {_module, name, _arity} = endpoint)
+       when name != :handle_event do
+    case routes_to(routes, endpoint) do
+      [] -> false
+      found -> Enum.all?(found, &(&1.verb in ["GET", "HEAD"]))
+    end
+  end
+
+  defp reads_only?(_routes, _endpoint), do: false
+
+  # Whether every route to a controller action or LiveView goes through a pipeline that calls a policy, as
+  # `pipe_through :require_admin` does when its plug is one, or a live_session whose `on_mount` hook is or calls one.
+  defp routed_through_policy?({routes, router_code}, endpoint, policies, code) do
+    case routes_to(routes, endpoint) do
       [] ->
         false
 
-      routes ->
-        Enum.all?(routes, fn pipelines ->
-          start = Enum.filter(pipelines, &Map.has_key?(router_code.functions, &1))
-          calls_module?(start, MapSet.new(start), policies, router_code)
-        end)
+      found ->
+        Enum.all?(found, &checked_route?(&1, policies, router_code, code))
     end
+  end
+
+  defp checked_route?(route, policies, router_code, code) do
+    start = Enum.filter(route.pipe_through, &Map.has_key?(router_code.functions, &1))
+
+    hooks =
+      for hook <- route.on_mount,
+          Map.has_key?(code.functions, {hook, :on_mount, 4}),
+          do: {hook, :on_mount, 4}
+
+    calls_module?(start, MapSet.new(start), policies, router_code) or
+      Enum.any?(route.on_mount, &(&1 in policies)) or
+      calls_module?(hooks, MapSet.new(hooks), policies, code)
   end
 
   # The first call that writes to the database without the user asking, in the endpoint, the functions of its module
   # it calls, and the functions it gives the request to, which can read the user asking from it. A call given the
   # user asking is made on their behalf, along with everything it calls. A write found past a function of another
   # module is reported at the endpoint's call that led there.
-  defp unchecked_write(code, effects, {module, _, _} = endpoint),
-    do: unchecked_write([{endpoint, nil}], MapSet.new([endpoint]), module, code, effects)
+  defp unchecked_write(code, effects, {module, _, _} = endpoint) do
+    held? = loads_for_user?(code, module)
+    unchecked_write([{endpoint, nil}], MapSet.new([endpoint]), {module, held?}, code, effects)
+  end
 
   defp unchecked_write([], _seen, _module, _code, _effects), do: nil
 
-  defp unchecked_write([{key, origin} | rest], seen, module, code, effects) do
+  defp unchecked_write([{key, origin} | rest], seen, {module, held?} = endpoint, code, effects) do
     info = code.functions[key]
-    on_behalf = MapSet.new(info.actors.on_behalf)
+    on_behalf = MapSet.new(on_behalf(info, held?, code))
     requests = MapSet.new(info.actors.requests)
 
     {followed, outside} =
@@ -411,7 +450,13 @@ defmodule ArchTest.Effects do
               uniq: true,
               do: {target, origin || if(callee == module, do: nil, else: call)}
 
-        unchecked_write(next ++ rest, Enum.into(next, seen, &elem(&1, 0)), module, code, effects)
+        unchecked_write(
+          next ++ rest,
+          Enum.into(next, seen, &elem(&1, 0)),
+          endpoint,
+          code,
+          effects
+        )
 
       {call, path} when origin == nil ->
         {call, path}
@@ -419,6 +464,52 @@ defmodule ArchTest.Effects do
       {_call, path} ->
         {origin, [Rules.step(origin) | path]}
     end
+  end
+
+  # The calls a function makes on behalf of the user asking: those given the user, those in a function it gives to one
+  # that reads the user first, as a helper that checks the user's role and then runs the change does, and, in a
+  # LiveView or LiveComponent that loads its records for the user, those given a record its assigns hold.
+  defp on_behalf(info, held?, code) do
+    guarded =
+      for {{guard, _line}, calls} <- info.actors.callbacks,
+          guards?(guard, MapSet.new(), code),
+          call <- calls,
+          do: call
+
+    info.actors.on_behalf ++ guarded ++ if(held?, do: info.actors.held, else: [])
+  end
+
+  # A helper that reads the user asking before it runs the function it's given, itself or through a helper it gives
+  # its own function to, as `with_domain/4` calling `with_organization/3` does.
+  defp guards?(key, seen, code) do
+    case code.functions[key] do
+      %{actors: %{reads_user: true}} ->
+        true
+
+      %{actors: %{callbacks: callbacks}} ->
+        seen = MapSet.put(seen, key)
+
+        callbacks
+        |> Enum.map(fn {{guard, _line}, _calls} -> guard end)
+        |> Enum.uniq()
+        |> Enum.any?(&(not MapSet.member?(seen, &1) and guards?(&1, seen, code)))
+
+      nil ->
+        false
+    end
+  end
+
+  # A LiveView whose mount/3 or handle_params/3 loads records for the user asking, or a LiveComponent whose update/2
+  # is given the user by its parent, along with the records the parent loaded.
+  defp loads_for_user?(code, module) do
+    behaviours = Code.behaviours(code, module)
+
+    (Phoenix.LiveView in behaviours and
+       Enum.any?([{module, :mount, 3}, {module, :handle_params, 3}], fn key ->
+         match?(%{actors: %{on_behalf: [_ | _]}}, code.functions[key])
+       end)) or
+      (Phoenix.LiveComponent in behaviours and
+         match?(%{actors: %{reads_user: true}}, code.functions[{module, :update, 2}]))
   end
 
   defp policy_names([]), do: "a policy"

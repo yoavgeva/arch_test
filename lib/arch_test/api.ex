@@ -34,6 +34,38 @@ defmodule ArchTest.API do
   alias ArchTest.{Code, ModuleSet}
   alias ArchTest.Code.Rules
 
+  # Well-known callbacks of behaviours often out of scope, which modules implement without `@impl`.
+  @callbacks %{
+    Phoenix.LiveView => [
+      mount: 3,
+      handle_event: 3,
+      handle_info: 2,
+      handle_params: 3,
+      handle_async: 3,
+      render: 1
+    ],
+    Phoenix.LiveComponent => [
+      mount: 1,
+      update: 2,
+      update_many: 1,
+      handle_event: 3,
+      handle_async: 3,
+      render: 1
+    ],
+    Phoenix.Channel => [join: 3, handle_in: 3, handle_info: 2, handle_out: 3],
+    GenServer => [
+      init: 1,
+      handle_call: 3,
+      handle_cast: 2,
+      handle_info: 2,
+      handle_continue: 2,
+      terminate: 2
+    ],
+    Plug => [init: 1, call: 2]
+  }
+  # Names of functions that turn a value from outside into the code's own, where strings belong.
+  @converters ~r/^(parse|decode|cast|normalize|convert|from_|to_)/
+
   @doc false
   defmacro __using__(_opts) do
     quote do
@@ -119,8 +151,11 @@ defmodule ArchTest.API do
 
     violations =
       for module <- modules,
-          {key, info} <- written(code, module),
-          choice <- info.signature.choices do
+          values = get_in(code.modules, [module, :component_values]) || MapSet.new(),
+          {{_, name, _} = key, info} <- written(code, module),
+          not Regex.match?(@converters, Atom.to_string(name)),
+          choice <- info.signature.choices,
+          not MapSet.subset?(MapSet.new(choice.strings), values) do
         Rules.violation(code, "no_stringly_typed_choices", key,
           line: choice.line,
           message:
@@ -171,7 +206,17 @@ defmodule ArchTest.API do
         not info.injected,
         not String.starts_with?(Atom.to_string(name), "__"),
         not MapSet.member?(impls, {name, arity}),
+        not callback?(code, module, {name, arity}),
         do: {key, info}
+  end
+
+  # A callback of one of the module's behaviours, written with `@impl` or without: one the behaviour's BEAM file
+  # declares, when it's in scope, or a well-known one of Phoenix's and OTP's.
+  defp callback?(code, module, function) do
+    Enum.any?(Code.behaviours(code, module), fn behaviour ->
+      function in Map.get(@callbacks, behaviour, []) or
+        MapSet.member?(get_in(code.modules, [behaviour, :callbacks]) || MapSet.new(), function)
+    end)
   end
 
   defp public(code, module),

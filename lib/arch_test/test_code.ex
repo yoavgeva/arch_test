@@ -87,12 +87,13 @@ defmodule ArchTest.TestCode do
   @spec tests_use_their_subject(ModuleSet.t(), keyword()) :: :ok
   def tests_use_their_subject(%ModuleSet{} = subject, opts \\ []) do
     {tests, code, _effects, source} = analyze(subject, opts)
+    index = Enum.group_by(Map.keys(code.functions), &elem(&1, 0))
 
     violations =
       for test <- tests,
           target = named_after(test.name),
           MapSet.member?(code.scope, target),
-          usage = usage(test, target, code, source),
+          usage = usage(test, target, {code, index}, source),
           usage != :uses do
         {verb, fix} =
           case usage do
@@ -157,7 +158,7 @@ defmodule ArchTest.TestCode do
       for test <- tests,
           test.tests,
           %{target: {module, name, _arity} = target} = call <- test.calls,
-          {module, name} in @sleeps and call.argument != :infinity,
+          {module, name} in @sleeps and call.argument != :infinity and not call.callback,
           not retries?(test, call.label) do
         violation(test, "tests_dont_sleep", call.line,
           message:
@@ -180,13 +181,15 @@ defmodule ArchTest.TestCode do
   """
   @spec async_tests_share_no_state(ModuleSet.t(), keyword()) :: :ok
   def async_tests_share_no_state(%ModuleSet{} = subject, opts \\ []) do
-    {tests, _code, _effects, _source} = analyze(subject, opts)
+    {tests, _code, _effects, source} = analyze(subject, opts)
 
     violations =
       for test <- tests,
           test.async,
+          own = MapSet.new(for(other <- source.modules, other.file == test.file, do: other.name)),
           %{target: {module, name, _arity} = target} = call <- test.calls,
-          name in Map.get(@global, module, []) do
+          name in Map.get(@global, module, []),
+          not MapSet.member?(own, call.key_module) do
         violation(test, "async_tests_share_no_state", call.line,
           message:
             "#{call.label} changes global state with #{Rules.name(target, test.name)} in an async test, " <>
@@ -234,38 +237,73 @@ defmodule ArchTest.TestCode do
   end
 
   # Whether a test uses `target`, only mocks it, or never names it.
-  defp usage(test, target, code, source) do
+  defp usage(test, target, graph, source) do
     mocked = for %{module: ^target, function: function} <- test.mocks, do: function
 
     cond do
-      uses?(test, target, mocked, code, source) -> :uses
+      uses?(test, target, mocked, graph, source) -> :uses
       mocked != [] or Enum.any?(test.calls, &match?(%{target: {^target, _, _}}, &1)) -> :mocks
       true -> :never
     end
   end
 
-  defp uses?(test, target, mocked, code, source) do
+  defp uses?(test, target, mocked, graph, source) do
+    own = own_modules(test, source)
+
     target in test.references or real_call?(test, target, mocked) or nested?(test, target) or
       (Regex.match?(@web, inspect(target)) and requests?(test)) or
-      exercised?(test, target, code, source)
+      Enum.any?(
+        own,
+        &(target in &1.references or Enum.any?(&1.calls, fn call -> calls?(call, target) end))
+      ) or
+      runs_task?(test, target) or
+      exercised?(test, target, graph, source, own)
+  end
+
+  defp calls?(%{target: {module, _, _}}, target), do: module == target
+
+  # The modules the test file defines that the test names, as a migration it runs is: their code runs too.
+  defp own_modules(test, source) do
+    for other <- source.modules,
+        other.file == test.file and other.name != test.name,
+        other.name in test.references or
+          Enum.any?(test.calls, &match?(%{target: {module, _, _}} when module == other.name, &1)),
+        do: other
+  end
+
+  # A Mix task the test runs by its name, as `Mix.Task.run("my_app.install", [])` does.
+  defp runs_task?(test, target) do
+    case inspect(target) do
+      "Mix.Tasks." <> _ ->
+        task = Mix.Task.task_name(target)
+
+        case File.read(test.file) do
+          {:ok, text} -> String.contains?(text, ~s("#{task}"))
+          {:error, _reason} -> false
+        end
+
+      _other ->
+        false
+    end
   end
 
   # Code the test calls reaches the target: calls it, or names it, as a registry listing rule modules does, directly
   # or through the functions it calls, or through a test helper's calls.
-  defp exercised?(test, target, code, source) do
+  defp exercised?(test, target, {code, _index} = graph, source, own) do
     helpers =
       for module <- helper_modules(test),
           call <- Map.get(source.support, module, []),
           do: call
 
     start =
-      for %{target: {module, _, _} = key} <- test.calls ++ helpers,
+      for %{target: {module, _, _} = key} <-
+            test.calls ++ helpers ++ Enum.flat_map(own, & &1.calls),
           module != target,
           Map.has_key?(code.functions, key),
           uniq: true,
-          do: key
+          do: {key, true}
 
-    reach(start, MapSet.new(start), target, code)
+    reach(start, MapSet.new(start, &elem(&1, 0)), target, graph)
   end
 
   # The modules a test calls, and those it imports a function it calls from, as `findings(text)` is from
@@ -285,23 +323,37 @@ defmodule ArchTest.TestCode do
   defp imported?(%{target: {:local, name, arity}}, only), do: {name, arity} in only
   defp imported?(_call, _only), do: false
 
-  defp reach([], _seen, _target, _code), do: false
+  # Follows calls, and once, from code reached by calls, into the functions of a module it names as a value, as a
+  # step list `[decode: MyApp.Decode]` or a struct's default does: code that names a module may run it.
+  defp reach([], _seen, _target, _graph), do: false
 
-  defp reach([key | rest], seen, target, code) do
+  defp reach([{key, follow_names?} | rest], seen, target, {code, index} = graph) do
     info = code.functions[key]
 
-    if MapSet.member?(info.references, target) do
+    # A behaviour is used through its implementations.
+    if MapSet.member?(info.references, target) or target in Code.behaviours(code, elem(key, 0)) do
       true
     else
-      next =
+      called =
         for %{target: callee} <- info.calls,
             Map.has_key?(code.functions, callee),
             callee not in seen,
             uniq: true,
-            do: callee
+            do: {callee, follow_names?}
 
-      reach(next ++ rest, Enum.into(next, seen), target, code)
+      named = if follow_names?, do: named_functions(info, index, seen), else: []
+
+      next = Enum.uniq_by(called ++ named, &elem(&1, 0))
+      reach(next ++ rest, Enum.into(next, seen, &elem(&1, 0)), target, graph)
     end
+  end
+
+  defp named_functions(info, index, seen) do
+    for module <- info.references,
+        callee <- Map.get(index, module, []),
+        callee not in seen,
+        uniq: true,
+        do: {callee, false}
   end
 
   # A call to one of the target's functions the test doesn't replace with a mock.
@@ -358,7 +410,59 @@ defmodule ArchTest.TestCode do
           info.kind == :def and not info.injected and (function == nil or name == function),
           do: key
 
-    functions != [] and Enum.all?(functions, &(Map.get(effects, &1, %{}) == %{}))
+    opaque = opaque(code)
+
+    functions != [] and
+      Enum.all?(functions, &(Map.get(effects, &1, %{}) == %{} and not MapSet.member?(opaque, &1)))
+  end
+
+  # The functions whose effects the code can't show: they call a library outside Elixir's and Erlang's own, as an
+  # SDK such as `Shopify` is, or a module chosen at runtime, directly or through the project functions they call.
+  defp opaque(code) do
+    standard =
+      Map.new(
+        for {_key, info} <- code.functions,
+            %{target: {module, _, _}} <- info.calls,
+            uniq: true,
+            do: {module, standard?(module, code)}
+      )
+
+    direct =
+      for {key, info} <- code.functions,
+          info.dynamic or
+            Enum.any?(info.calls, fn %{target: {module, _, _}} ->
+              not Map.fetch!(standard, module)
+            end),
+          into: MapSet.new(),
+          do: key
+
+    spread_to_callers(direct, code.functions)
+  end
+
+  defp spread_to_callers(set, functions) do
+    next =
+      for {key, %{calls: calls}} <- functions,
+          not MapSet.member?(set, key),
+          Enum.any?(calls, &MapSet.member?(set, &1.target)),
+          into: set,
+          do: key
+
+    if MapSet.size(next) == MapSet.size(set), do: set, else: spread_to_callers(next, functions)
+  end
+
+  # A project module, or one of Elixir's or Erlang's own, whose effects are known.
+  defp standard?(module, code) do
+    MapSet.member?(code.scope, module) or
+      case :code.which(module) do
+        :preloaded -> true
+        path when is_list(path) -> String.starts_with?(List.to_string(path), standard_roots())
+        _missing -> false
+      end
+  end
+
+  defp standard_roots do
+    elixir = :elixir |> :code.lib_dir() |> List.to_string() |> Path.dirname()
+    [List.to_string(:code.root_dir()), elixir]
   end
 
   defp violation(test, rule, line, details) do

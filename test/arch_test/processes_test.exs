@@ -157,6 +157,42 @@ defmodule ArchTest.ProcessesTest do
          defp deliver(user), do: IO.puts(user)
        end
        """},
+      {"lib/process_fixture/runner.ex",
+       """
+       defmodule ProcessFixture.Runner do
+         use GenServer
+
+         def run(fun), do: GenServer.call(__MODULE__, {:run, fun})
+
+         @impl true
+         def init(state), do: {:ok, state}
+
+         @impl true
+         def handle_call({:run, fun}, _from, state), do: {:reply, fun.(), state}
+       end
+       """},
+      {"lib/process_fixture/broadcasting.ex",
+       """
+       defmodule ProcessFixture.Broadcasting do
+         defmacro __using__(_opts) do
+           quote do
+             def broadcast(message), do: Task.start(fn -> IO.puts(message) end)
+           end
+         end
+       end
+       """},
+      {"lib/process_fixture/prices_cache.ex",
+       """
+       defmodule ProcessFixture.PricesCache do
+         use ProcessFixture.Broadcasting
+       end
+       """},
+      {"lib/process_fixture/stock_cache.ex",
+       """
+       defmodule ProcessFixture.StockCache do
+         use ProcessFixture.Broadcasting
+       end
+       """},
       {"lib/process_fixture/waits.ex",
        """
        defmodule ProcessFixture.Waits do
@@ -221,6 +257,25 @@ defmodule ArchTest.ProcessesTest do
          def read_in_time(socket), do: :gen_tcp.recv(socket, 0, 5_000)
          def get(url), do: :httpc.request(url)
          def get_in_time(url), do: :httpc.request(:get, {url, []}, [timeout: 5_000], [])
+
+         def flush(ref) do
+           if Process.cancel_timer(ref) == false do
+             receive do
+               :tick -> :ok
+             end
+           end
+
+           :ok
+         end
+
+         def run_linked(fun) do
+           pid = spawn_link(fun)
+
+           receive do
+             {:done, ^pid, result} -> result
+             {:EXIT, ^pid, reason} -> {:error, reason}
+           end
+         end
        end
        """}
     ])
@@ -272,7 +327,8 @@ defmodule ArchTest.ProcessesTest do
       assert Enum.map(violations, &{&1.caller_function, &1.line, &1.message}) == [
                {{:notify, 1}, 2, message.("Task.start/1")},
                {{:watch, 0}, 8, message.("spawn/1")},
-               {{:start_cache, 0}, 10, message.("GenServer.start/2")}
+               {{:start_cache, 0}, 10, message.("GenServer.start/2")},
+               {{:broadcast, 1}, 2, message.("Task.start/1")}
              ]
 
       assert hd(violations).fix ==

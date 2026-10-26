@@ -128,6 +128,7 @@ defmodule ArchTest.Processes do
             callbacks |> Enum.reject(fn {_key, info} -> info.injected end) |> Enum.take(1),
           Enum.all?(callbacks, fn {_key, info} -> info.state == :kept end),
           Enum.all?(callbacks, fn {key, _info} -> Map.get(effects, key, %{}) == %{} end),
+          not Enum.any?(callbacks, fn {_key, info} -> info.runs_funs or info.dynamic end),
           not owns_resource?(code, module, effects) do
         Rules.violation(code, "processes_hold_state", key,
           line: info.line,
@@ -161,16 +162,22 @@ defmodule ArchTest.Processes do
           name not in [:start, :start_link],
           %{target: {callee, callee_name, _}} = call <- info.calls,
           {callee, callee_name} in @unsupervised do
-        Rules.violation(code, "processes_are_supervised", {module, name, arity},
-          line: call.line,
-          callee: call.target,
-          message:
-            "starts a process with #{Rules.name(call.target, module)} that no supervisor watches, " <>
-              "so its crash goes unnoticed and shutdown doesn't stop it",
-          fix:
-            "start it under a supervisor, such as Task.Supervisor.start_child/2, or add it to the supervision tree"
-        )
+        # Code a macro injects into every module that uses it is one finding, at its first use.
+        once = if info.macro, do: {info.macro, name, arity, call.target}, else: make_ref()
+
+        {once,
+         Rules.violation(code, "processes_are_supervised", {module, name, arity},
+           line: call.line,
+           callee: call.target,
+           message:
+             "starts a process with #{Rules.name(call.target, module)} that no supervisor watches, " <>
+               "so its crash goes unnoticed and shutdown doesn't stop it",
+           fix:
+             "start it under a supervisor, such as Task.Supervisor.start_child/2, or add it to the supervision tree"
+         )}
       end
+      |> Enum.uniq_by(&elem(&1, 0))
+      |> Enum.map(&elem(&1, 1))
 
     Rules.report(violations, "processes_are_supervised")
   end

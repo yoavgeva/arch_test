@@ -8,6 +8,7 @@ defmodule ArchTest.GuardrailsTest do
   @pricing_test "test/guard_fixture/pricing_test.exs"
   @accounts "lib/guard_fixture/accounts.ex"
   @import_task "lib/guard_fixture/import_task.ex"
+  @cleanup "lib/guard_fixture/cleanup.ex"
 
   setup_all do
     File.rm_rf!(@root)
@@ -252,6 +253,80 @@ defmodule ArchTest.GuardrailsTest do
              end
            end
            """},
+          {@cleanup,
+           """
+           defmodule GuardFixture.Cleanup do
+             use GenServer
+
+             def init(path), do: {:ok, path}
+
+             def terminate(_reason, path) do
+               try do
+                 File.write(path, "bye")
+               catch
+                 :exit, _reason -> :ok
+               end
+             end
+
+             def orphaned(pid) do
+               try do
+                 GenServer.call(pid, :check).running
+               catch
+                 :exit, _reason -> []
+               end
+             end
+
+             def drop_temp(path) do
+               File.rm(path)
+               :ok
+             end
+
+             def clear_cache(path) do
+               File.write(path, "")
+               :ok
+             end
+
+             def import(path) do
+               case File.read(path) do
+                 {:ok, text} ->
+                   text
+
+                 {:error, reason} ->
+                   File.write("failed.log", path)
+                   {:discard, reason}
+               end
+             end
+
+             def availability(path) do
+               case File.stat(path) do
+                 {:ok, %{type: :directory}} -> :taken
+                 {:ok, _other} -> :file
+                 {:error, _reason} -> :available
+               end
+             end
+
+             def delete_chunk(path) do
+               case File.rm(path) do
+                 :ok ->
+                   _ = File.write("deleted.log", path)
+                   true
+
+                 {:error, _reason} ->
+                   false
+               end
+             end
+           end
+           """},
+          {"lib/guard_fixture/discounts.ex",
+           """
+           defmodule GuardFixture.Discounts do
+             @doc "The price after a discount at the given rate."
+             def discounted(price, rate), do: price * (1 - rate)
+
+             @doc false
+             def discounted(price), do: discounted(price, 0.1)
+           end
+           """},
           {"deps/fake_dep/lib/generated.ex",
            """
            defmodule GuardFixture.Generated do
@@ -263,6 +338,16 @@ defmodule ArchTest.GuardrailsTest do
 
     for {file, source} <- sources, do: write(file, source)
     CompiledFixture.compile(Path.join(@root, "ebin"), sources)
+
+    write("test/guard_fixture/discounts_test.exs", """
+    defmodule GuardFixture.DiscountsTest do
+      use ExUnit.Case, async: true
+
+      test "applies the default rate" do
+        assert GuardFixture.Discounts.discounted(100) == 90.0
+      end
+    end
+    """)
 
     write(@pricing_test, """
     defmodule GuardFixture.PricingTest do
@@ -330,6 +415,15 @@ defmodule ArchTest.GuardrailsTest do
                {{:pay, 1}, 138, "turns any {:error, _} into nil, so callers can't tell it failed",
                 "return the error, or handle only the reasons you expect"}
              ]
+    end
+  end
+
+  describe "no_swallowed_errors/2 on cleanup" do
+    test "passes cleanup, errors passed on, outcome classifications and success flags" do
+      violations =
+        capture(&Guardrails.no_swallowed_errors/2) |> Enum.filter(&(&1.file == @cleanup))
+
+      assert Enum.map(violations, &{&1.caller_function, &1.line, &1.message}) == []
     end
   end
 

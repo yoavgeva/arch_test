@@ -109,6 +109,27 @@ failing test first:
   takes the `:DOWN` of the process it waits on, aren't unbounded waits.
 - Tests reach their subject through helpers imported with `only:`.
 
+They then ran on eight open-source projects: Broadway, Oban, Req, Livebook,
+Hex.pm, Plausible, TeslaMate and Changelog.com. Each was compiled in a throwaway
+container and read without loading it. The false positives fixed:
+
+- Cleanup functions, error branches that hand the error on, `{:ok, _}` and
+  atom-returning parsers, and documented functions a `@doc false` twin calls.
+- GenServer callbacks that run a function they're given; code a macro injects
+  into many modules is one finding; receives after `:erlang.cancel_timer/1` and
+  ones waiting for `:EXIT`.
+- Fixed vocabularies (single characters, file names, paths), callback and
+  converter clauses, and component attribute values aren't stringly typed
+  choices; returns that hold a variable another branch returns are compared.
+- Tests reach their subject through modules named as values, the test file's
+  own modules, Mix tasks run by name, HEEx components and behaviours'
+  implementations; sleeps in callbacks, keys a test file's own module names,
+  and mocks of code calling libraries outside Elixir and Erlang pass.
+- A write is authorized inside a function given to a helper that checks the
+  user first, on a record a LiveView loaded for the user, behind a
+  `live_session`'s `on_mount` policy hook, or in an action only GET routes
+  reach.
+
 ### Fixed
 
 - Elixir 1.20's compiler warnings: an unused `require Logger` in

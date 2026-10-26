@@ -92,6 +92,56 @@ defmodule ArchTest.TestCodeTest do
          def total(lines), do: Enum.sum(lines)
        end
        """},
+      {"lib/test_fixture/known_projects.ex",
+       """
+       defmodule TestFixture.Json do
+         def decode(body), do: {:json, body}
+       end
+
+       defmodule TestFixture.Decode do
+         @decoders [json: TestFixture.Json]
+         def run(request), do: Keyword.fetch!(@decoders, request.format).decode(request.body)
+       end
+
+       defmodule TestFixture.Client do
+         def run(request), do: Enum.reduce(steps(), request, fn {_name, step}, acc -> step.run(acc) end)
+         defp steps, do: [decode: TestFixture.Decode]
+       end
+
+       defmodule TestFixture.Migrations do
+         def up, do: :ok
+       end
+
+       defmodule Mix.Tasks.TestFixture.Install do
+         def run(_args), do: :ok
+       end
+
+       defmodule TestFixture.Components do
+         def badge(assigns), do: assigns
+       end
+
+       defmodule TestFixture.Promotions do
+         @compile {:no_warn_undefined, [Shopify]}
+         def discount(code), do: Shopify.create_price_rule(code)
+       end
+
+       defmodule TestFixture.Adapter do
+         @callback fetch(term()) :: term()
+       end
+
+       defmodule TestFixture.HttpAdapter do
+         @behaviour TestFixture.Adapter
+         def fetch(request), do: request
+       end
+
+       defmodule TestFixture.Fetcher do
+         def get(request), do: TestFixture.HttpAdapter.fetch(request)
+       end
+
+       defmodule TestFixture.Paying do
+         def pay(code), do: TestFixture.Promotions.discount(code)
+       end
+       """},
       {"lib/test_fixture_web/room_channel.ex",
        """
        defmodule TestFixtureWeb.RoomChannel do
@@ -269,6 +319,111 @@ defmodule ArchTest.TestCodeTest do
     end
     """)
 
+    write_test("test/test_fixture/json_test.exs", """
+    defmodule TestFixture.JsonTest do
+      use ExUnit.Case, async: true
+
+      test "decodes through the client's steps" do
+        assert TestFixture.Client.run(%{format: :json, body: "x"}) == {:json, "x"}
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/migrations_test.exs", """
+    defmodule TestFixture.MigrationsTest do
+      use ExUnit.Case, async: true
+
+      defmodule Step do
+        def up, do: TestFixture.Migrations.up()
+      end
+
+      test "migrates" do
+        assert Step.up() == :ok
+      end
+    end
+    """)
+
+    write_test("test/mix/tasks/test_fixture.install_test.exs", """
+    defmodule Mix.Tasks.TestFixture.InstallTest do
+      use ExUnit.Case, async: true
+
+      test "installs" do
+        assert Mix.Task.run("test_fixture.install", []) == :ok
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/components_test.exs", """
+    defmodule TestFixture.ComponentsTest do
+      use ExUnit.Case, async: true
+
+      test "renders a badge" do
+        assigns = %{}
+        assert ~H|<TestFixture.Components.badge label="new" />|
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/paying_test.exs", """
+    defmodule TestFixture.PayingTest do
+      use ExUnit.Case, async: true
+
+      test "pays with a discount" do
+        Mimic.stub(TestFixture.Promotions, :discount, fn _code -> {:ok, "x"} end)
+        assert TestFixture.Paying.pay("x") == {:ok, "x"}
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/slow_peer_test.exs", """
+    defmodule TestFixture.SlowPeerTest do
+      use ExUnit.Case, async: true
+
+      test "times out on a slow peer" do
+        assert start_peer(fn ->
+                 Process.sleep(100)
+                 :late
+               end)
+      end
+
+      test "keeps a slow step for later" do
+        steps = [fn -> Process.sleep(50) end]
+        assert length(steps) == 1
+      end
+
+      test "waits in a loop" do
+        Enum.each(1..2, fn _step -> Process.sleep(10) end)
+      end
+
+      defp start_peer(fun), do: fun
+    end
+    """)
+
+    write_test("test/test_fixture/adapter_test.exs", """
+    defmodule TestFixture.AdapterTest do
+      use ExUnit.Case, async: true
+
+      test "fetches through the adapter" do
+        assert TestFixture.Fetcher.get(1) == 1
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/step_test.exs", """
+    defmodule TestFixture.StepTest do
+      use ExUnit.Case, async: true
+
+      defmodule Step do
+        def version, do: :persistent_term.get({__MODULE__, :version})
+      end
+
+      test "reads its version" do
+        :persistent_term.put({Step, :version}, 2)
+        assert Step.version() == 2
+      end
+    end
+    """)
+
     :ok
   end
 
@@ -309,7 +464,7 @@ defmodule ArchTest.TestCodeTest do
   end
 
   describe "tests_dont_sleep/2" do
-    test "flags sleeps in tests, and passes polling helpers, slow fakes and parked processes" do
+    test "flags sleeps in tests, and passes polling helpers, slow fakes, callbacks and parked processes" do
       violations = capture(&TestCode.tests_dont_sleep/2)
 
       assert Enum.map(violations, &{&1.module, &1.line, &1.message}) == [
@@ -317,7 +472,10 @@ defmodule ArchTest.TestCodeTest do
                 ~s(test "sends a receipt" sleeps with Process.sleep/1, ) <>
                   "which is too short on a slow machine and slows every run"},
                {TestFixture.CheckoutTest, 23,
-                ~s(test "formats" sleeps with :timer.sleep/1, which is too short on a slow machine and slows every run)}
+                ~s(test "formats" sleeps with :timer.sleep/1, which is too short on a slow machine and slows every run)},
+               {TestFixture.SlowPeerTest, 17,
+                ~s(test "waits in a loop" sleeps with Process.sleep/1, ) <>
+                  "which is too short on a slow machine and slows every run"}
              ]
 
       assert hd(violations).fix ==
@@ -345,7 +503,7 @@ defmodule ArchTest.TestCodeTest do
   end
 
   defp capture(rule) do
-    subject = ModuleSet.new(["TestFixture.**", "TestFixtureWeb.**"])
+    subject = ModuleSet.new(["TestFixture.**", "TestFixtureWeb.**", "Mix.Tasks.**"])
 
     File.cd!(@root, fn ->
       Assertions.capture_violations(fn ->
