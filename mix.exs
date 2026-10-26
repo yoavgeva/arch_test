@@ -82,6 +82,7 @@ defmodule ArchTest.MixProject do
         "guides/effects.md",
         "guides/processes.md",
         "guides/api.md",
+        "guides/data.md",
         "guides/test-code.md",
         "guides/design-rule-examples.md",
         {"test/support/fixture_app/README.md",
@@ -101,6 +102,7 @@ defmodule ArchTest.MixProject do
           "guides/effects.md",
           "guides/processes.md",
           "guides/api.md",
+          "guides/data.md",
           "guides/test-code.md",
           "guides/design-rule-examples.md"
         ],
@@ -120,6 +122,7 @@ defmodule ArchTest.MixProject do
           ArchTest.Effects,
           ArchTest.Processes,
           ArchTest.API,
+          ArchTest.Data,
           ArchTest.TestCode,
           ArchTest.Guardrails,
           ArchTest.Recommended

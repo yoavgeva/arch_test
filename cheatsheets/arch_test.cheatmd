@@ -249,6 +249,9 @@ writes_are_authorized(
   app: :my_app,
   policy: [MyApp.Policy, MyAppWeb.Plugs.RequireAdmin]
 )
+
+# endpoints that load private records by id pass the current user or check a policy
+reads_are_authorized(modules_matching("MyAppWeb.Account.**"), app: :my_app, policy: MyApp.Policy)
 ```
 
 ## Processes
@@ -287,6 +290,25 @@ no_alternative_return_types(modules_matching("MyApp.**"), app: :my_app)
 
 # no transfer(from_id, to_id, amount) where a swap runs
 typed_identifiers(modules_matching("MyApp.Billing.**"), app: :my_app)
+```
+
+## Data
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.Data
+
+# no cast(user, params, [:email, :role]) the request's params reach
+no_mass_assignment(modules_matching("MyAppWeb.**"), app: :my_app, policy: MyApp.Policy)
+
+# no change(post, views: post.views + 1) without a lock: use update_all(inc: ...)
+no_lost_updates(modules_matching("MyApp.**"), app: :my_app)
+
+# no field :price, :float: use :decimal or integer cents
+no_float_money(modules_matching("MyApp.**"), app: :my_app)
+
+# no Repo.all(Post) a page reaches: paginate or filter
+no_unbounded_queries(modules_matching("MyAppWeb.**"), app: :my_app)
 ```
 
 ## Test Code

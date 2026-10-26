@@ -14,6 +14,7 @@ defmodule ArchTest.ExamplesTest do
     {ArchTest.Effects, :no_work_in_init},
     {ArchTest.Effects, :no_io_in_transactions},
     {ArchTest.Effects, :writes_are_authorized},
+    {ArchTest.Effects, :reads_are_authorized},
     {ArchTest.Processes, :processes_have_one_interface},
     {ArchTest.Processes, :processes_hold_state},
     {ArchTest.Processes, :processes_are_supervised},
@@ -22,6 +23,10 @@ defmodule ArchTest.ExamplesTest do
     {ArchTest.API, :typed_identifiers},
     {ArchTest.API, :no_stringly_typed_choices},
     {ArchTest.API, :no_alternative_return_types},
+    {ArchTest.Data, :no_mass_assignment},
+    {ArchTest.Data, :no_lost_updates},
+    {ArchTest.Data, :no_float_money},
+    {ArchTest.Data, :no_unbounded_queries},
     {ArchTest.TestCode, :tests_use_their_subject},
     {ArchTest.TestCode, :tests_dont_mock_pure_modules},
     {ArchTest.TestCode, :tests_dont_sleep},
@@ -77,6 +82,49 @@ defmodule ArchTest.ExamplesTest do
              def deliver(email, config \\\\ []), do: Swoosh.Mailer.deliver(email, config)
            end
            """}
+
+  # `Ecto.Changeset`, `Ecto.Schema` and `Ecto.Query`, as far as the examples use them: a schema's `field`s become the
+  # types `__changeset__/0` returns, and `limit/2` and `offset/2` become the builder calls Ecto's macros expand to.
+  @ecto {"deps/ecto/lib/ecto.ex",
+         """
+         defmodule Ecto.Changeset do
+           def cast(data, _params, _fields), do: data
+           def change(data, _changes \\\\ %{}), do: data
+           def optimistic_lock(changeset, _field), do: changeset
+         end
+
+         defmodule Ecto.Schema do
+           defmacro __using__(_opts) do
+             quote do
+               import Ecto.Schema, only: [schema: 2, field: 2, field: 3]
+               Module.register_attribute(__MODULE__, :ecto_fields, accumulate: true)
+             end
+           end
+
+           defmacro schema(_source, do: block) do
+             quote do
+               unquote(block)
+               @ecto_changeset Map.new(@ecto_fields)
+               defstruct Keyword.keys(@ecto_fields)
+               def __changeset__, do: @ecto_changeset
+             end
+           end
+
+           defmacro field(name, type, _opts \\\\ []), do: quote(do: @ecto_fields {unquote(name), unquote(type)})
+         end
+
+         defmodule Ecto.Query do
+           defmacro limit(query, count),
+             do: quote(do: Ecto.Query.Builder.LimitOffset.apply(unquote(query), :limit, unquote(count)))
+
+           defmacro offset(query, {:^, _, [count]}),
+             do: quote(do: Ecto.Query.Builder.LimitOffset.apply(unquote(query), :offset, unquote(count)))
+         end
+
+         defmodule Ecto.Query.Builder.LimitOffset do
+           def apply(query, _kind, _count), do: query
+         end
+         """}
 
   setup_all do
     %{examples: @guide |> File.read!() |> examples()}
@@ -142,7 +190,7 @@ defmodule ArchTest.ExamplesTest do
     defined = files |> Map.values() |> Enum.flat_map(&modules/1)
 
     stubs =
-      for {_path, source} = stub <- [@repo, @mailer, @web],
+      for {_path, source} = stub <- [@repo, @mailer, @web, @ecto],
           modules(source) -- defined != [],
           into: %{},
           do: stub

@@ -83,6 +83,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guide, whose examples a test compiles and checks.
 - CI runs on Elixir 1.20 and OTP 29.
 
+- `ArchTest.Data`, rules about stored data:
+  - `no_mass_assignment/2` follows the request's params into
+    `Ecto.Changeset.cast/3,4` and flags privileged fields cast from them, such
+    as `role`, `admin`, `user_id` or `confirmed_at`. Keys the code puts, merges
+    or drops on the way, and changes a policy or a user-checking helper guards,
+    pass.
+  - `no_lost_updates/2` flags a field set from its own old value before a
+    write, outside `optimistic_lock/3` or a `FOR UPDATE` lock held in a
+    transaction.
+  - `no_float_money/2` flags schema and struct fields named for money stored
+    as floats.
+  - `no_unbounded_queries/2` flags endpoints that reach `Repo.all/1` on a whole
+    table, with no `where`, `limit` or aggregate.
+- `ArchTest.Effects.reads_are_authorized/2` flags endpoints that load a record
+  by a key the request sends, through `get`, `get!`, `get_by` or `get_by!`,
+  with nothing tying the read to the user asking. Not recommended: many
+  records are public.
+- `ArchTest.Recommended` adds `no_mass_assignment`, `no_lost_updates` and
+  `no_float_money`.
+
 ### Checked on real code
 
 The design rules ran on three Elixir codebases: a Phoenix app, an SDK and a
@@ -129,6 +149,15 @@ container and read without loading it. The false positives fixed:
   user first, on a record a LiveView loaded for the user, behind a
   `live_session`'s `on_mount` policy hook, or in an action only GET routes
   reach.
+
+The data rules and `reads_are_authorized` ran on the same eleven codebases.
+They found lost updates in Plausible's report recipients, Changelog.com's
+click and impression counters, and a `FOR UPDATE` lock outside a transaction
+in the Phoenix app; unbounded whole-table loads in TeslaMate; and an endpoint
+that reads any job's status by id. Their false positives were fixed with a
+failing test first: maps the code builds, keys it sets or drops, rebound
+variables, helpers that check the user or open a transaction, and records a
+LiveView loaded for the user.
 
 ### Fixed
 
