@@ -104,6 +104,41 @@ defmodule ArchTest.ProcessesTest do
          def terminate(_reason, %{client: client}), do: Agent.stop(client)
        end
        """},
+      {"lib/process_fixture/owner_guard.ex",
+       """
+       defmodule ProcessFixture.OwnerGuard do
+         use GenServer
+
+         def start_link(owner), do: GenServer.start_link(__MODULE__, owner)
+
+         @impl true
+         def init(owner), do: {:ok, %{owner: owner, monitor: Process.monitor(owner)}}
+
+         @impl true
+         def handle_info({:DOWN, monitor, :process, _owner, _reason}, %{monitor: monitor} = state),
+           do: {:stop, :normal, state}
+
+         def handle_info(_message, state), do: {:noreply, state}
+       end
+       """},
+      {"lib/process_fixture/connection.ex",
+       """
+       defmodule ProcessFixture.Connection do
+         use GenServer
+
+         def start_link(endpoint), do: GenServer.start_link(__MODULE__, endpoint)
+         def start(endpoint), do: GenServer.start(__MODULE__, endpoint)
+
+         @impl true
+         def init(endpoint), do: {:ok, endpoint}
+
+         @impl true
+         def handle_call(:endpoint, _from, endpoint), do: {:reply, endpoint, endpoint}
+
+         @impl true
+         def handle_cast({:endpoint, endpoint}, _old), do: {:noreply, endpoint}
+       end
+       """},
       {"lib/process_fixture/notifier.ex",
        """
        defmodule ProcessFixture.Notifier do
@@ -148,7 +183,7 @@ defmodule ArchTest.ProcessesTest do
   end
 
   describe "processes_hold_state/2" do
-    test "flags a GenServer that only organizes code, and passes ones that hold state, do I/O or own a resource" do
+    test "flags a GenServer that only organizes code, and passes ones that hold state, do I/O, own a resource or monitor a process" do
       violations = capture(&Processes.processes_hold_state/2)
 
       assert Enum.map(violations, &{&1.module, &1.caller_function, &1.line, &1.message, &1.fix}) ==
@@ -162,7 +197,7 @@ defmodule ArchTest.ProcessesTest do
   end
 
   describe "processes_are_supervised/2" do
-    test "flags processes started outside a supervisor, and passes supervised and awaited ones" do
+    test "flags processes started outside a supervisor, and passes supervised, awaited and start functions" do
       violations = capture(&Processes.processes_are_supervised/2)
 
       message =

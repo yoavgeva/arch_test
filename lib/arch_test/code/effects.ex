@@ -55,7 +55,6 @@ defmodule ArchTest.Code.Effects do
     :gun => :http,
     :gen_tcp => :network,
     :gen_udp => :network,
-    :ssl => :network,
     File => :file,
     :file => :file,
     :filelib => :file,
@@ -90,6 +89,8 @@ defmodule ArchTest.Code.Effects do
     Mint.HTTP1 => {~w(connect request)a, :http},
     Mint.HTTP2 => {~w(connect request)a, :http},
     :inet => {~w(getaddr getaddrs gethostbyname)a, :network},
+    # Starting the ssl application isn't I/O; connecting and talking are.
+    :ssl => {~w(connect send recv handshake listen transport_accept close shutdown)a, :network},
     Path => {~w(wildcard)a, :file},
     IO => {~w(puts write inspect warn binwrite gets read getn binread)a, :console},
     :io => {~w(format fwrite put_chars write nl read get_line get_chars)a, :console},
@@ -124,6 +125,11 @@ defmodule ArchTest.Code.Effects do
       spawn_opt: :process,
       register: :process,
       unregister: :process,
+      # What Process.monitor/1, Process.link/1 and their opposites compile to.
+      monitor: :process,
+      demonitor: :process,
+      link: :process,
+      unlink: :process,
       put: :process,
       system_time: :clock,
       monotonic_time: :clock,
@@ -185,7 +191,12 @@ defmodule ArchTest.Code.Effects do
     callers = callers(keys, functions)
 
     Enum.reduce(@kinds, %{}, fn kind, effects ->
-      start = for key <- keys, step <- List.wrap(direct(functions[key], kind)), do: {key, [step]}
+      start =
+        for key <- keys,
+            path <- [direct(functions[key], kind, effects)],
+            path != nil,
+            do: {key, path}
+
       effects = Enum.reduce(start, effects, fn {key, path}, acc -> put(acc, key, kind, path) end)
       spread(Enum.map(start, &elem(&1, 0)), kind, callers, effects)
     end)
@@ -212,11 +223,25 @@ defmodule ArchTest.Code.Effects do
       module in [Ecto.Adapters.SQL] or
         String.starts_with?(Atom.to_string(module), "Elixir.Ecto.Repo.")
 
-  defp direct(info, kind) do
+  # A function's own effect of `kind`, with its path: its first call that's a seed of it. Raw SQL that writes, as
+  # `Repo.query!("UPDATE ...", params)` runs, is a write wherever it leads, since database reads are found first.
+  defp direct(info, kind, effects) do
     info.calls
     |> Enum.sort_by(& &1.line)
-    |> Enum.find_value(fn call -> if seed(call.target) == kind, do: step(call) end)
+    |> Enum.find_value(&direct_path(&1, kind, effects))
   end
+
+  defp direct_path(%{writes_sql: true}, :db_read, _effects), do: nil
+
+  defp direct_path(%{writes_sql: true} = call, :db_write, effects) do
+    cond do
+      seed(call.target) in [:db_read, :db_write] -> [step(call)]
+      path = effects[call.target][:db_read] -> [step(call) | path]
+      true -> nil
+    end
+  end
+
+  defp direct_path(call, kind, _effects), do: if(seed(call.target) == kind, do: [step(call)])
 
   # Each project function's callers, in the order of their keys and then of their calls' lines.
   defp callers(keys, functions) do
@@ -247,6 +272,7 @@ defmodule ArchTest.Code.Effects do
 
     callers
     |> Map.get(callee, [])
+    |> Enum.reject(fn {_caller, call} -> kind == :db_read and call.writes_sql end)
     |> Enum.reduce({next, effects}, fn {caller, call}, {queue, acc} ->
       if Map.has_key?(Map.get(acc, caller, %{}), kind),
         do: {queue, acc},

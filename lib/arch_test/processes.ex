@@ -143,7 +143,9 @@ defmodule ArchTest.Processes do
   `spawn/1`, `Task.start/1`, `GenServer.start/2` and `Agent.start/1` start a process that nothing links to, so
   when it crashes nobody notices, and when the application shuts down it keeps running. Start it under a
   supervisor instead, such as `Task.Supervisor.start_child/2` for a task, or add it to the supervision tree.
-  `Task.async/1` with `Task.await/2` and the `start_link` functions are fine: the caller is linked and waits.
+  `Task.async/1` with `Task.await/2` and the `start_link` functions are fine: the caller is linked and waits. So is
+  a module's own `start` or `start_link` function, such as a library's `start/1` that calls `GenServer.start/2`: its
+  caller decides how the process is supervised.
   """
   @spec processes_are_supervised(ModuleSet.t(), keyword()) :: :ok
   def processes_are_supervised(%ModuleSet{} = subject, opts \\ []) do
@@ -152,6 +154,7 @@ defmodule ArchTest.Processes do
     violations =
       for module <- modules,
           {{^module, name, arity}, info} <- Code.functions_of(code, module),
+          name not in [:start, :start_link],
           %{target: {callee, callee_name, _}} = call <- info.calls,
           {callee, callee_name} in @unsupervised do
         Rules.violation(code, "processes_are_supervised", {module, name, arity},

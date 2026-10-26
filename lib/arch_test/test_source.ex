@@ -5,12 +5,13 @@ defmodule ArchTest.TestSource do
   # mocks it sets up, whether it runs async, and the test or setup each call is in. `Mox.defmock/2` declarations
   # anywhere in the test paths map each Mox mock to the behaviours it stands for.
 
-  defstruct modules: [], mocks: %{}
+  defstruct modules: [], mocks: %{}, support: %{}
 
   @type call :: %{
           target: {module() | :local, atom(), arity()},
           line: pos_integer() | nil,
-          label: String.t()
+          label: String.t(),
+          argument: atom() | integer() | nil
         }
   @type mock :: %{
           module: module(),
@@ -23,11 +24,16 @@ defmodule ArchTest.TestSource do
           file: String.t(),
           line: pos_integer() | nil,
           async: boolean(),
+          tests: boolean(),
           calls: [call()],
           references: [module()],
           mocks: [mock()]
         }
-  @type t :: %__MODULE__{modules: [test_module()], mocks: %{module() => [module()]}}
+  @type t :: %__MODULE__{
+          modules: [test_module()],
+          mocks: %{module() => [module()]},
+          support: %{module() => [call()]}
+        }
 
   # Mimic's, Mox's and Mock's functions that replace a module's functions, and the argument that names it.
   @mocking %{
@@ -55,13 +61,23 @@ defmodule ArchTest.TestSource do
 
     parsed = Enum.map(files, &read/1)
 
-    modules =
-      for {file, modules, _mocks} <- parsed,
-          String.ends_with?(file, "_test.exs"),
-          module <- modules,
-          do: module
+    {tests, support} =
+      Enum.split_with(parsed, fn {file, _modules, _mocks} ->
+        String.ends_with?(file, "_test.exs")
+      end)
 
-    %__MODULE__{modules: modules, mocks: parsed |> Enum.flat_map(&elem(&1, 2)) |> Map.new()}
+    %__MODULE__{
+      modules: for({_file, modules, _mocks} <- tests, module <- modules, do: module),
+      mocks: parsed |> Enum.flat_map(&elem(&1, 2)) |> Map.new(),
+      # Helpers in the test paths, such as `test/support` modules a test calls, with what they call.
+      support:
+        for(
+          {_file, modules, _mocks} <- support,
+          module <- modules,
+          into: %{},
+          do: {module.name, module.calls}
+        )
+    }
   end
 
   defp read(file) do
@@ -98,6 +114,7 @@ defmodule ArchTest.TestSource do
       aliases: %{},
       label: "the test module",
       async: false,
+      tests: false,
       calls: [],
       references: [],
       mocks: [],
@@ -134,7 +151,7 @@ defmodule ArchTest.TestSource do
     do: %{state | references: [resolve(target, state) | state.references]}
 
   defp walk({:test, _, [name | rest]}, state) when is_binary(name),
-    do: labelled(rest, ~s(test "#{name}"), state)
+    do: labelled(rest, ~s(test "#{name}"), %{state | tests: true})
 
   defp walk({setup, _, args}, state) when setup in [:setup, :setup_all],
     do: labelled(args, "#{setup}", state)
@@ -186,7 +203,7 @@ defmodule ArchTest.TestSource do
         defmock(args, state)
 
       module ->
-        state = add_call(state, {module, name, length(args) + extra}, meta[:line])
+        state = add_call(state, {module, name, length(args) + extra}, meta[:line], args)
 
         if module in @mock_libraries,
           do: mocking(name, args, meta, state),
@@ -231,8 +248,22 @@ defmodule ArchTest.TestSource do
 
   defp defmock(_args, state), do: state
 
-  defp add_call(state, target, line),
-    do: %{state | calls: [%{target: target, line: line, label: state.label} | state.calls]}
+  # A call, with its first argument when that's a literal atom or number, such as the `:infinity` of a sleep that
+  # parks a process.
+  defp add_call(state, target, line, args \\ []) do
+    argument =
+      case args do
+        [first | _] when is_atom(first) or is_integer(first) -> first
+        _ -> nil
+      end
+
+    %{
+      state
+      | calls: [
+          %{target: target, line: line, label: state.label, argument: argument} | state.calls
+        ]
+    }
+  end
 
   defp finish(state) do
     %{
@@ -240,6 +271,7 @@ defmodule ArchTest.TestSource do
       file: state.file,
       line: state.line,
       async: state.async,
+      tests: state.tests,
       calls: Enum.reverse(state.calls),
       references: state.references |> Enum.reject(&is_nil/1) |> Enum.uniq(),
       mocks: Enum.reverse(state.mocks)

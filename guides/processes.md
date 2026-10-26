@@ -64,8 +64,8 @@ that:
 
 - changes its state, as a counter or a cache does;
 - does I/O in its callbacks, serializing access to a file, a port or an API;
-- owns a resource: starts or opens something in `init/1`, such as a client connection, or cleans up in its own
-  `terminate/2`.
+- owns a resource: starts or opens something in `init/1`, such as a client connection, or monitors a process
+  there, or cleans up in its own `terminate/2`.
 
 ---
 
@@ -84,4 +84,5 @@ def notify(user), do: Task.Supervisor.start_child(MyApp.TaskSupervisor, fn -> de
 
 `processes_are_supervised/2` flags `spawn/1,3`, `Process.spawn/2,4`, `Task.start/1,3`, `GenServer.start/2,3` and
 `Agent.start/1,2`. `Task.async/1` with `Task.await/2` and the `start_link` functions are fine: the caller is linked
-to the process and waits for it, or a supervisor starts it.
+to the process and waits for it, or a supervisor starts it. So is a module's own `start` or `start_link` function,
+such as a library's `start/1` calling `GenServer.start/2`: its caller decides how the process is supervised.

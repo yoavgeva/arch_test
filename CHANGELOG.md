@@ -51,6 +51,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guide, whose examples a test compiles and checks.
 - CI runs on Elixir 1.20 and OTP 29.
 
+### Checked on real code
+
+The design rules ran on three Elixir codebases: a Phoenix app, an SDK and a
+library. Every finding was read, and each false positive was fixed with a
+failing test first:
+
+- `Process.monitor/1` and `link/1` compile to `:erlang` calls, which now count
+  as process effects, so a GenServer that monitors its owner owns a resource.
+- Starting the `ssl` application isn't network I/O; connecting is.
+- A module's own `start`/`start_link` functions may start an unlinked process.
+- A test uses its subject when the code it calls, or a test helper it calls,
+  reaches it, including through a registry naming rule modules.
+- Raw SQL that writes, as a string, an interpolated one or one a helper builds,
+  is a write, not a query.
+- Sleeps in polling helpers, in fakes without tests, and
+  `Process.sleep(:infinity)` aren't flagged.
+
 ### Fixed
 
 - Elixir 1.20's compiler warnings: an unused `require Logger` in

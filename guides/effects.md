@@ -67,7 +67,9 @@ end
   `user_id = order.user_id`.
 - **A query** reads the database or makes an HTTP request, directly or through the functions it calls. Writes
   aren't queries, and neither are functions named for a change, such as `create_user/1`, `send_email/2` or
-  `Req.post!/2`: a loop of commands is often what the code means to do.
+  `Req.post!/2`: a loop of commands is often what the code means to do. Raw SQL that writes is a write too, as
+  `Repo.query!("UPDATE ...", params)` is, whether the statement is a string, an interpolated one, or built by a
+  function of the module, as an `update_sql(table)` helper builds one.
 
 ---
 

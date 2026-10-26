@@ -85,7 +85,8 @@ defmodule ArchTest.Effects do
   Asserts that no function in `subject` makes a query once per item: N+1.
 
   A query reads the database or makes an HTTP request, directly or through the functions it calls, and isn't
-  named for a change, as `create_user/1` or `Req.post!/2` are. It counts when it runs once per item of a loop: in a
+  named for a change, as `create_user/1` or `Req.post!/2` are, nor runs raw SQL that writes, as
+  `Repo.query!("UPDATE ...", params)` does. It counts when it runs once per item of a loop: in a
   function given to `Enum`, `Stream` or `Task.async_stream`, captured into one, as in
   `Enum.map(ids, &Accounts.get_user!/1)`, or in the body of a `for`, and is given the item or a value made from it.
 
@@ -100,7 +101,7 @@ defmodule ArchTest.Effects do
       for module <- modules,
           {{^module, name, arity}, info} <- Code.functions_of(code, module),
           call <- info.calls,
-          call.per_item,
+          call.per_item and not call.writes_sql,
           {kind, path} <- List.wrap(query(call.target, effects)) do
         phrase = if kind == :http, do: "makes an HTTP request", else: "queries the database"
         reaching = Rules.reaching([Rules.step(call) | path], call.target, module)

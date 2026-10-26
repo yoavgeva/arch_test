@@ -23,7 +23,8 @@ defmodule ArchTest.Code do
           line: pos_integer() | nil,
           loop: String.t() | nil,
           per_item: boolean(),
-          receiver: atom() | nil
+          receiver: atom() | nil,
+          writes_sql: boolean()
         }
   @type function_info :: %{
           kind: :def | :defp,
@@ -31,7 +32,8 @@ defmodule ArchTest.Code do
           calls: [call()],
           state: :kept | :changed | nil,
           injected: boolean(),
-          stub: String.t() | nil
+          stub: String.t() | nil,
+          references: MapSet.t(module())
         }
   @type module_info :: %{
           file: String.t() | nil,
@@ -238,6 +240,12 @@ defmodule ArchTest.Code do
           into: MapSet.new(),
           do: {name, arity}
 
+    sql_writers =
+      for {{name, arity}, kind, _meta, clauses} <- definitions,
+          kind in [:def, :defp] and Walker.sql_writer?(clauses),
+          into: MapSet.new(),
+          do: {name, arity}
+
     for {{name, arity}, kind, meta, clauses} <- definitions, kind in [:def, :defp], into: %{} do
       state = if {name, arity} in @callbacks, do: Walker.state(clauses)
 
@@ -245,10 +253,11 @@ defmodule ArchTest.Code do
        %{
          kind: kind,
          line: meta[:line],
-         calls: Walker.calls(clauses, module, locals),
+         calls: Walker.calls(clauses, module, locals, sql_writers),
          state: state,
          injected: Keyword.has_key?(meta, :context),
-         stub: Walker.stub(clauses)
+         stub: Walker.stub(clauses),
+         references: Walker.references(clauses)
        }}
     end
   end

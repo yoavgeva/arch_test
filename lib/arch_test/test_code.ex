@@ -79,19 +79,20 @@ defmodule ArchTest.TestCode do
   `MyApp.Accounts`, and not only through mocks of it.
 
   A use is the module's name anywhere in the test, other than as the module a mock replaces, a call to one of
-  its functions the test doesn't mock, or a use of a module nested in it, as `MyApp.Billing.Invoice` is in
-  `MyApp.Billing`. A test of a controller, live view or channel that sends requests through `Phoenix.ConnTest`,
+  its functions the test doesn't mock, a use of a module nested in it, as `MyApp.Billing.Invoice` is in
+  `MyApp.Billing`, or code the test calls that reaches it: calls it, or names it, as a registry of rule modules
+  does, directly or through the functions it calls. A test of a controller, live view or channel that sends requests through `Phoenix.ConnTest`,
   `Phoenix.LiveViewTest` or `Phoenix.ChannelTest` uses it too. Tests named after no module in scope are skipped.
   """
   @spec tests_use_their_subject(ModuleSet.t(), keyword()) :: :ok
   def tests_use_their_subject(%ModuleSet{} = subject, opts \\ []) do
-    {tests, code, _effects, _source} = analyze(subject, opts)
+    {tests, code, _effects, source} = analyze(subject, opts)
 
     violations =
       for test <- tests,
           target = named_after(test.name),
           MapSet.member?(code.scope, target),
-          usage = usage(test, target),
+          usage = usage(test, target, code, source),
           usage != :uses do
         {verb, fix} =
           case usage do
@@ -143,7 +144,10 @@ defmodule ArchTest.TestCode do
   Asserts that no test sleeps, with `Process.sleep/1` or `:timer.sleep/1`.
 
   A sleep long enough on a fast machine is too short on a slow one, and slows every run. Wait for what the test
-  needs instead: `assert_receive/3` for a message, or a monitor's `:DOWN` message for a process to stop.
+  needs instead: `assert_receive/3` for a message, or a monitor's `:DOWN` message for a process to stop. Sleeps in a
+  helper that retries itself, as an `assert_eventually` polling a condition does, pass, and so do sleeps in fakes a
+  test file defines without tests of its own, which stand in for a slow dependency, and `Process.sleep(:infinity)`,
+  which parks a process rather than waiting.
   """
   @spec tests_dont_sleep(ModuleSet.t(), keyword()) :: :ok
   def tests_dont_sleep(%ModuleSet{} = subject, opts \\ []) do
@@ -151,8 +155,10 @@ defmodule ArchTest.TestCode do
 
     violations =
       for test <- tests,
+          test.tests,
           %{target: {module, name, _arity} = target} = call <- test.calls,
-          {module, name} in @sleeps do
+          {module, name} in @sleeps and call.argument != :infinity,
+          not retries?(test, call.label) do
         violation(test, "tests_dont_sleep", call.line,
           message:
             "#{call.label} sleeps with #{Rules.name(target, test.name)}, which is too short on a slow machine " <>
@@ -193,6 +199,20 @@ defmodule ArchTest.TestCode do
     Rules.report(violations, "async_tests_share_no_state")
   end
 
+  # A helper that calls itself, retrying until a condition holds or it runs out of attempts.
+  defp retries?(test, label) do
+    case Regex.run(~r/^(\w+[?!]?)\/\d+$/, label) do
+      [_, name] ->
+        Enum.any?(test.calls, fn
+          %{target: {:local, callee, _arity}, label: ^label} -> Atom.to_string(callee) == name
+          _call -> false
+        end)
+
+      nil ->
+        false
+    end
+  end
+
   defp analyze(subject, opts) do
     source = TestSource.load(opts)
     names = Map.new(source.modules, &{&1.name, []})
@@ -214,19 +234,57 @@ defmodule ArchTest.TestCode do
   end
 
   # Whether a test uses `target`, only mocks it, or never names it.
-  defp usage(test, target) do
+  defp usage(test, target, code, source) do
     mocked = for %{module: ^target, function: function} <- test.mocks, do: function
 
     cond do
-      uses?(test, target, mocked) -> :uses
+      uses?(test, target, mocked, code, source) -> :uses
       mocked != [] or Enum.any?(test.calls, &match?(%{target: {^target, _, _}}, &1)) -> :mocks
       true -> :never
     end
   end
 
-  defp uses?(test, target, mocked) do
+  defp uses?(test, target, mocked, code, source) do
     target in test.references or real_call?(test, target, mocked) or nested?(test, target) or
-      (Regex.match?(@web, inspect(target)) and requests?(test))
+      (Regex.match?(@web, inspect(target)) and requests?(test)) or
+      exercised?(test, target, code, source)
+  end
+
+  # Code the test calls reaches the target: calls it, or names it, as a registry listing rule modules does, directly
+  # or through the functions it calls, or through a test helper's calls.
+  defp exercised?(test, target, code, source) do
+    helpers =
+      for %{target: {module, _, _}} <- test.calls,
+          call <- Map.get(source.support, module, []),
+          do: call
+
+    start =
+      for %{target: {module, _, _} = key} <- test.calls ++ helpers,
+          module != target,
+          Map.has_key?(code.functions, key),
+          uniq: true,
+          do: key
+
+    reach(start, MapSet.new(start), target, code)
+  end
+
+  defp reach([], _seen, _target, _code), do: false
+
+  defp reach([key | rest], seen, target, code) do
+    info = code.functions[key]
+
+    if MapSet.member?(info.references, target) do
+      true
+    else
+      next =
+        for %{target: callee} <- info.calls,
+            Map.has_key?(code.functions, callee),
+            callee not in seen,
+            uniq: true,
+            do: callee
+
+      reach(next ++ rest, Enum.into(next, seen), target, code)
+    end
   end
 
   # A call to one of the target's functions the test doesn't replace with a mock.

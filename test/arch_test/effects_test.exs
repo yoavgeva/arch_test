@@ -15,11 +15,12 @@ defmodule ArchTest.EffectsTest do
       {"lib/effects_fixture/repo.ex",
        """
        defmodule EffectsFixture.Repo do
-         @compile {:no_warn_undefined, [Ecto.Repo.Queryable, Ecto.Repo.Schema]}
+         @compile {:no_warn_undefined, [Ecto.Repo.Queryable, Ecto.Repo.Schema, Ecto.Adapters.SQL]}
 
          def all(queryable, opts \\\\ []), do: Ecto.Repo.Queryable.all(__MODULE__, queryable, opts)
          def get!(queryable, id, opts \\\\ []), do: Ecto.Repo.Queryable.get!(__MODULE__, queryable, id, opts)
          def insert(struct, opts \\\\ []), do: Ecto.Repo.Schema.insert(__MODULE__, struct, opts)
+         def query!(sql, params), do: Ecto.Adapters.SQL.query!(__MODULE__, sql, params)
        end
        """},
       {"lib/effects_fixture/accounts.ex",
@@ -78,6 +79,15 @@ defmodule ArchTest.EffectsTest do
            Stream.resource(fn -> 0 end, fn page -> {Repo.all({query, page}), page + 1} end, fn _page -> :ok end)
          end
 
+         @bump_sql "UPDATE counts SET n = n + 1 WHERE id = $1"
+         def bump(rows), do: Enum.each(rows, fn row -> Repo.query!(@bump_sql, [row.id]) end)
+
+         def titles(ids), do: Enum.map(ids, fn id -> Repo.query!("SELECT title FROM scenes WHERE id = $1", [id]) end)
+
+         def bump_table(rows, table), do: Enum.each(rows, fn row -> Repo.query!(update_sql(table), [row.id]) end)
+
+         defp update_sql(table), do: "UPDATE \#{table} SET n = n + 1 WHERE id = $1"
+
          defp load(id), do: Repo.get!(:orders, id)
        end
        """},
@@ -122,6 +132,16 @@ defmodule ArchTest.EffectsTest do
          def handle_continue(:load, state), do: {:noreply, Map.put(state, :prices, File.read!(state.path))}
        end
 
+       defmodule EffectsFixture.TlsClient do
+         use GenServer
+
+         @impl true
+         def init(options) do
+           :ok = :ssl.start()
+           {:ok, options}
+         end
+       end
+
        defmodule EffectsFixture.Ticker do
          use GenServer
 
@@ -161,7 +181,9 @@ defmodule ArchTest.EffectsTest do
                 "queries the database once per item: Stream.map/2 calls EffectsFixture.Accounts.get_user!/1, " <>
                   "which reaches EffectsFixture.Repo.get!/2"},
                {{:lines, 1}, 38,
-                "queries the database once per item: for calls EffectsFixture.Repo.all/1"}
+                "queries the database once per item: for calls EffectsFixture.Repo.all/1"},
+               {{:titles, 1}, 47,
+                "queries the database once per item: Enum.map/2 calls EffectsFixture.Repo.query!/2"}
              ]
     end
 
@@ -179,7 +201,15 @@ defmodule ArchTest.EffectsTest do
     end
 
     test "passes code that queries once before the loop, or only computes or writes per item" do
-      batched = ["with_users_batched", "names", "import_users", "count", "pages"]
+      batched = [
+        "with_users_batched",
+        "names",
+        "import_users",
+        "count",
+        "pages",
+        "bump",
+        "bump_table"
+      ]
 
       reported = capture(&Effects.no_queries_in_loops/2, "EffectsFixture.Orders")
 
@@ -221,7 +251,7 @@ defmodule ArchTest.EffectsTest do
   end
 
   describe "no_work_in_init/2" do
-    test "flags a GenServer whose init/1 does I/O, and passes deferred work and scheduling" do
+    test "flags a GenServer whose init/1 does I/O, and passes deferred work, scheduling and starting an application" do
       violations = capture(&Effects.no_work_in_init/2, "EffectsFixture.**")
 
       assert Enum.map(violations, &{&1.module, &1.line, &1.message, &1.fix}) == [

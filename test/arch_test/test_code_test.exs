@@ -52,6 +52,32 @@ defmodule ArchTest.TestCodeTest do
          def count, do: 0
        end
        """},
+      {"lib/test_fixture/linter.ex",
+       """
+       defmodule TestFixture.Rules.Length do
+         def check(text), do: if(String.length(text) > 80, do: [:too_long], else: [])
+       end
+
+       defmodule TestFixture.Rules.Width do
+         def check(text), do: if(String.contains?(text, "\t"), do: [:tab], else: [])
+       end
+
+       defmodule TestFixture.Registry do
+         def rules, do: [TestFixture.Rules.Length, TestFixture.Rules.Width]
+       end
+
+       defmodule TestFixture.Linter do
+         def check(text), do: Enum.flat_map(TestFixture.Registry.rules(), & &1.check(text))
+       end
+
+       defmodule TestFixture.Reading do
+         def read(text), do: String.split(text)
+       end
+
+       defmodule TestFixture.Api do
+         def read(text), do: TestFixture.Reading.read(text)
+       end
+       """},
       {"lib/test_fixture/billing.ex",
        """
        defmodule TestFixture.Billing do
@@ -118,7 +144,7 @@ defmodule ArchTest.TestCodeTest do
 
       test "totals" do
         System.put_env("CURRENCY", "EUR")
-        assert TestFixture.Checkout.pay([1]) == 1
+        assert TestFixture.Orders.count() == 0
       end
     end
     """)
@@ -131,6 +157,69 @@ defmodule ArchTest.TestCodeTest do
       test "counts" do
         Mimic.stub(Orders, :count, fn -> 3 end)
         assert Orders.count() == 3
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/polling_test.exs", """
+    defmodule TestFixture.PollingTest do
+      use ExUnit.Case, async: true
+
+      defmodule SlowCodec do
+        def decode(binary) do
+          Process.sleep(50)
+          binary
+        end
+      end
+
+      test "polls until the codec answers" do
+        parked = spawn(fn -> Process.sleep(:infinity) end)
+        assert_eventually(fn -> SlowCodec.decode("x") == "x" and Process.alive?(parked) end)
+      end
+
+      defp assert_eventually(fun, attempts \\\\ 10) do
+        if fun.() or attempts == 0 do
+          :ok
+        else
+          Process.sleep(5)
+          assert_eventually(fun, attempts - 1)
+        end
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/rules/length_test.exs", """
+    defmodule TestFixture.Rules.LengthTest do
+      use ExUnit.Case, async: true
+
+      test "flags long text, through the linter that runs every rule" do
+        assert TestFixture.Linter.check(String.duplicate("x", 81)) == [:too_long]
+      end
+    end
+    """)
+
+    write_test("test/support/linting.exs", """
+    defmodule TestFixture.Test.Linting do
+      def findings(text), do: TestFixture.Linter.check(text)
+    end
+    """)
+
+    write_test("test/test_fixture/rules/width_test.exs", """
+    defmodule TestFixture.Rules.WidthTest do
+      use ExUnit.Case, async: true
+
+      test "flags tabs, through a test helper" do
+        assert TestFixture.Test.Linting.findings("a\tb") == [:tab]
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/reading_test.exs", """
+    defmodule TestFixture.ReadingTest do
+      use ExUnit.Case, async: true
+
+      test "reads through the API" do
+        assert TestFixture.Api.read("a b") == ["a", "b"]
       end
     end
     """)
@@ -169,7 +258,7 @@ defmodule ArchTest.TestCodeTest do
   end
 
   describe "tests_use_their_subject/2" do
-    test "flags a test that never uses the module it's named after, or only mocks it, and passes channel and nested-module tests" do
+    test "flags a test that never uses the module it's named after, or only mocks it, and passes tests that reach it" do
       violations = capture(&TestCode.tests_use_their_subject/2)
 
       assert Enum.map(violations, &{&1.module, &1.file, &1.line, &1.message, &1.fix}) == [
@@ -205,7 +294,7 @@ defmodule ArchTest.TestCodeTest do
   end
 
   describe "tests_dont_sleep/2" do
-    test "flags sleeps in tests" do
+    test "flags sleeps in tests, and passes polling helpers, slow fakes and parked processes" do
       violations = capture(&TestCode.tests_dont_sleep/2)
 
       assert Enum.map(violations, &{&1.module, &1.line, &1.message}) == [

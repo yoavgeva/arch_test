@@ -50,6 +50,8 @@ end
 - the module's name anywhere in the test, other than as the module a mock replaces;
 - a call to one of its functions the test doesn't mock;
 - a use of a module nested in it, as `MyApp.Billing.Invoice` is in `MyApp.Billing`;
+- code the test calls, or a test helper it calls, that reaches the module: calls it, or names it, as a registry
+  listing rule modules does, directly or through the functions it calls;
 - for controllers, live views and channels, requests through `Phoenix.ConnTest` (`get/2`, `post/3`...),
   `Phoenix.LiveViewTest` (`live/2`) and `Phoenix.ChannelTest` (`subscribe_and_join/3`).
 
@@ -74,7 +76,11 @@ Mocks of code that reads the database, makes HTTP requests or uses the network p
 ## 3. No sleeping
 
 A sleep long enough on a fast machine is too short on a slow one, and slows every run. `tests_dont_sleep/2` flags
-`Process.sleep/1` and `:timer.sleep/1` in tests, setups and test helpers.
+`Process.sleep/1` and `:timer.sleep/1` in tests, setups and test helpers. It passes:
+
+- a helper that retries itself, as an `assert_eventually` polling a condition with a short sleep does;
+- fakes a test file defines without tests of their own, which stand in for a slow dependency;
+- `Process.sleep(:infinity)`, which parks a process rather than waiting.
 
 ```elixir
 # flagged

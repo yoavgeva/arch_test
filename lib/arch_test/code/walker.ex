@@ -9,9 +9,9 @@ defmodule ArchTest.Code.Walker do
   @per_step [{Stream, :resource}, {Stream, :unfold}, {Stream, :iterate}, {Stream, :repeatedly}]
 
   @doc false
-  @spec calls([tuple()], module(), MapSet.t()) :: [ArchTest.Code.call()]
-  def calls(clauses, module, locals) do
-    state = %{module: module, locals: locals, loop: nil, calls: []}
+  @spec calls([tuple()], module(), MapSet.t(), MapSet.t()) :: [ArchTest.Code.call()]
+  def calls(clauses, module, locals, sql_writers \\ MapSet.new()) do
+    state = %{module: module, locals: locals, sql_writers: sql_writers, loop: nil, calls: []}
 
     clauses
     |> Enum.reduce(state, fn {_meta, _args, guards, body}, acc ->
@@ -20,6 +20,27 @@ defmodule ArchTest.Code.Walker do
     |> Map.fetch!(:calls)
     |> Enum.reverse()
   end
+
+  @doc false
+  # The modules a function names, as values or as the targets of its calls: a registry listing rule modules names
+  # each of them.
+  @spec references([tuple()]) :: MapSet.t(module())
+  def references(clauses) do
+    clauses
+    |> Enum.map(fn {_meta, _args, _guards, body} -> body end)
+    |> Macro.prewalk(MapSet.new(), fn
+      atom, acc when is_atom(atom) ->
+        {atom, if(module?(atom), do: MapSet.put(acc, atom), else: acc)}
+
+      node, acc ->
+        {node, acc}
+    end)
+    |> elem(1)
+  end
+
+  defp module?(atom), do: String.starts_with?(Atom.to_string(atom), "Elixir.")
+
+  @writes_sql ~r/^\s*(INSERT|UPDATE|DELETE|MERGE|UPSERT)\b/i
 
   # Words that say a function isn't written yet.
   @unfinished ~r/not (yet )?implemented|unimplemented|implement me|\bTODO\b|\bFIXME\b/i
@@ -213,7 +234,45 @@ defmodule ArchTest.Code.Walker do
     state
     |> add(target, meta, state.loop != nil and uses?(args, state.loop.vars))
     |> with_receiver(args)
+    |> with_sql(args)
   end
+
+  # A raw SQL statement that writes, as `Repo.query!("UPDATE counts SET ...", params)` runs: the call is a write,
+  # though the library function it calls also reads.
+  defp with_sql(%{calls: [call | rest]} = state, args) do
+    if Enum.any?(args, &writes_sql?(&1, state)),
+      do: %{state | calls: [%{call | writes_sql: true} | rest]},
+      else: state
+  end
+
+  # A statement that writes: a string, an interpolated one, or a call to a function of the module that builds one.
+  defp writes_sql?(sql, _state) when is_binary(sql), do: sql =~ @writes_sql
+
+  defp writes_sql?({:<<>>, _, [first | _]}, _state) when is_binary(first),
+    do: first =~ @writes_sql
+
+  # After expansion, an interpolated string's first part is a typed segment: `"UPDATE " :: binary`.
+  defp writes_sql?({:<<>>, _, [{:"::", _, [first, _type]} | _]}, _state) when is_binary(first),
+    do: first =~ @writes_sql
+
+  defp writes_sql?({name, _, args}, state) when is_atom(name) and is_list(args),
+    do: MapSet.member?(state.sql_writers, {name, length(args)})
+
+  defp writes_sql?(_argument, _state), do: false
+
+  @doc false
+  # Whether every clause of a function returns a raw SQL statement that writes, as a builder of `UPDATE` statements
+  # does.
+  @spec sql_writer?([tuple()]) :: boolean()
+  def sql_writer?(clauses) do
+    clauses != [] and
+      Enum.all?(clauses, fn {_meta, _args, _guards, body} ->
+        writes_sql?(last_expression(body), %{sql_writers: MapSet.new()})
+      end)
+  end
+
+  defp last_expression({:__block__, _, [_ | _] = expressions}), do: List.last(expressions)
+  defp last_expression(expression), do: expression
 
   defp add(state, target, meta, per_item) do
     call = %{
@@ -221,7 +280,8 @@ defmodule ArchTest.Code.Walker do
       line: meta[:line],
       loop: state.loop && state.loop.label,
       per_item: per_item,
-      receiver: nil
+      receiver: nil,
+      writes_sql: false
     }
 
     %{state | calls: [call | state.calls]}
