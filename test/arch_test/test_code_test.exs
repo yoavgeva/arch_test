@@ -138,6 +138,34 @@ defmodule ArchTest.TestCodeTest do
          def get(request), do: TestFixture.HttpAdapter.fetch(request)
        end
 
+       defmodule TestFixture.Sigils do
+         defmacro sigil_Q(text, _modifiers), do: text
+       end
+
+       defmodule TestFixture.Normalize do
+         def run(input, _opts), do: {:ok, String.trim(input)}
+       end
+
+       defprotocol TestFixture.Renderable do
+         def render(item)
+       end
+
+       defmodule TestFixture.Badge do
+         defstruct label: "badge"
+
+         defimpl TestFixture.Renderable do
+           def render(badge), do: badge.label
+         end
+       end
+
+       defmodule TestFixture.Parser do
+         def parse(name), do: struct(Module.concat([TestFixture, Macro.camelize(name)]), %{})
+       end
+
+       defmodule TestFixture.Page do
+         def render(item), do: TestFixture.Renderable.render(item)
+       end
+
        defmodule TestFixture.Paying do
          def pay(code), do: TestFixture.Promotions.discount(code)
        end
@@ -405,6 +433,36 @@ defmodule ArchTest.TestCodeTest do
 
       test "fetches through the adapter" do
         assert TestFixture.Fetcher.get(1) == 1
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/sigils_test.exs", """
+    defmodule TestFixture.SigilsTest do
+      use TestFixture.SigilCase
+
+      test "quotes" do
+        assert ~Q"text" == "text"
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/normalize_test.exs", """
+    defmodule TestFixture.NormalizeTest do
+      use TestFixture.PhaseCase, phase: TestFixture.Normalize
+
+      test "trims" do
+        assert run_phase(" a ") == {:ok, "a"}
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/badge_test.exs", """
+    defmodule TestFixture.BadgeTest do
+      use ExUnit.Case, async: true
+
+      test "renders a parsed badge" do
+        assert TestFixture.Page.render(TestFixture.Parser.parse("badge")) == "badge"
       end
     end
     """)

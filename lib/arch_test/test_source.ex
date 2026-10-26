@@ -142,8 +142,10 @@ defmodule ArchTest.TestSource do
   defp walk({:alias, _, [target | options]}, state),
     do: %{state | aliases: aliases(target, options, state)}
 
+  # A `use`, whose options can name what the test is about, as `use MyApp.PhaseCase, phase: MyApp.Normalize` does.
   defp walk({:use, _, [target | options]}, state) do
     async = options |> List.flatten() |> Keyword.get(:async, false) == true
+    state = walk(options, state)
 
     %{
       state

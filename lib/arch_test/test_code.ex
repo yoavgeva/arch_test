@@ -252,15 +252,38 @@ defmodule ArchTest.TestCode do
 
   defp uses?(test, target, mocked, graph, source) do
     own = own_modules(test, source)
+    names?(test, target, mocked, own) or runs?(test, target, graph, source, own)
+  end
 
+  # The test names the target: as a value, in a real call, as a module nested in it, through its web requests, or in
+  # a module of its own file.
+  defp names?(test, target, mocked, own) do
     target in test.references or real_call?(test, target, mocked) or nested?(test, target) or
       (Regex.match?(@web, inspect(target)) and requests?(test)) or
       Enum.any?(
         own,
         &(target in &1.references or Enum.any?(&1.calls, fn call -> calls?(call, target) end))
-      ) or
-      runs_task?(test, target) or
+      )
+  end
+
+  # The test runs the target's code: a Mix task by its name, one of its macros, or code that reaches it.
+  defp runs?(test, target, graph, source, own) do
+    runs_task?(test, target) or uses_macro?(test, target, graph) or
       exercised?(test, target, graph, source, own)
+  end
+
+  # A macro the target defines, called without its module, as the `~GQL` sigil is once a case template imports it.
+  defp uses_macro?(test, target, {code, _index}) do
+    case code.modules do
+      %{^target => %{macros: macros}} ->
+        Enum.any?(test.calls, fn
+          %{target: {:local, name, arity}} -> MapSet.member?(macros, {name, arity})
+          _call -> false
+        end)
+
+      _modules ->
+        false
+    end
   end
 
   defp calls?(%{target: {module, _, _}}, target), do: module == target
@@ -333,8 +356,10 @@ defmodule ArchTest.TestCode do
   defp reach([{key, follow_names?} | rest], seen, target, {code, index} = graph) do
     info = code.functions[key]
 
-    # A behaviour is used through its implementations.
-    if MapSet.member?(info.references, target) or target in Code.behaviours(code, elem(key, 0)) do
+    # A behaviour is used through its implementations, and a protocol a test reaches through its implementation for
+    # the target, as Absinthe's parser builds structs whose code is their `Blueprint.Draft` implementation.
+    if MapSet.member?(info.references, target) or target in Code.behaviours(code, elem(key, 0)) or
+         implements?(elem(key, 0), target, code) do
       true
     else
       called =
@@ -349,6 +374,11 @@ defmodule ArchTest.TestCode do
       next = Enum.uniq_by(called ++ named, &elem(&1, 0))
       reach(next ++ rest, Enum.into(next, seen, &elem(&1, 0)), target, graph)
     end
+  end
+
+  defp implements?(module, target, code) do
+    Map.has_key?(code.functions, {module, :__protocol__, 1}) and
+      MapSet.member?(code.scope, Module.concat(module, target))
   end
 
   defp named_functions(info, index, seen) do
