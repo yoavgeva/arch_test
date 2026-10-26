@@ -51,7 +51,8 @@ defmodule ArchTest.Code do
           impls: MapSet.t({atom(), arity()}),
           hidden: MapSet.t({atom(), arity()}),
           callbacks: MapSet.t({atom(), arity()}),
-          routes: [route()]
+          routes: [route()],
+          component_values: MapSet.t(String.t())
         }
   @type route :: %{controller: module(), action: atom(), pipe_through: [atom()]}
   @type t :: %__MODULE__{
@@ -129,7 +130,15 @@ defmodule ArchTest.Code do
           Map.put(
             code.modules,
             module,
-            Map.take(read, [:file, :behaviours, :impls, :hidden, :callbacks, :routes])
+            Map.take(read, [
+              :file,
+              :behaviours,
+              :impls,
+              :hidden,
+              :callbacks,
+              :routes,
+              :component_values
+            ])
           ),
         functions: Map.merge(code.functions, read.functions)
     }
@@ -202,11 +211,31 @@ defmodule ArchTest.Code do
          hidden: hidden_in(binary),
          callbacks: callbacks_in(binary),
          functions: functions(module, info.definitions, booleans_in(binary)),
-         routes: routes_in(info.definitions)
+         routes: routes_in(info.definitions),
+         component_values: component_values_in(info.definitions)
        }}
     else
       _ -> :error
     end
+  end
+
+  # The string values a Phoenix component's attributes declare, as `attr :size, :string, values: ~w(small large)`
+  # does, from the `__components__/0` that `Phoenix.Component` writes.
+  defp component_values_in(definitions) do
+    for {{:__components__, 0}, _kind, _meta, clauses} <- definitions,
+        {_meta, _args, _guards, body} <- clauses,
+        value <- strings_in(body),
+        into: MapSet.new(),
+        do: value
+  end
+
+  defp strings_in(ast) do
+    ast
+    |> Macro.prewalk([], fn
+      value, acc when is_binary(value) -> {value, [value | acc]}
+      node, acc -> {node, acc}
+    end)
+    |> elem(1)
   end
 
   # A Phoenix router's routes, from the clauses of its `__match_route__/3`: each one's controller, action, and the

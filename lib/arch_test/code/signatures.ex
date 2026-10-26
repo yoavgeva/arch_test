@@ -142,6 +142,7 @@ defmodule ArchTest.Code.Signatures do
             do: Enum.at(args, position)
           ),
         length(Enum.uniq(strings)) >= 3,
+        not vocabulary?(strings),
         not parser?(
           for {_meta, args, _guards, body} <- clauses,
               is_binary(Enum.at(args, position)),
@@ -162,9 +163,10 @@ defmodule ArchTest.Code.Signatures do
 
         strings = string_arms |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
 
-        if length(strings) >= 3 and not parser?(Enum.map(string_arms, &elem(&1, 1))),
-          do: {node, [%{line: meta[:line], strings: strings} | acc]},
-          else: {node, acc}
+        if length(strings) >= 3 and not vocabulary?(strings) and
+             not parser?(Enum.map(string_arms, &elem(&1, 1))),
+           do: {node, [%{line: meta[:line], strings: strings} | acc]},
+           else: {node, acc}
 
       node, acc ->
         {node, acc}
@@ -176,9 +178,19 @@ defmodule ArchTest.Code.Signatures do
   # A parser turns each string into an atom: `:standard`, `{:ok, :standard}`, or `:error`.
   defp parser?(bodies), do: Enum.all?(bodies, &(tail(&1) |> parsed?()))
 
+  # Strings from a vocabulary outside the code, which atoms wouldn't name better: single characters, as a tokenizer's
+  # `"("` and `"["` are, file and template names, as `"index.html"` is, and paths, as `"/settings"` is.
+  defp vocabulary?(strings) do
+    Enum.all?(strings, &(String.length(&1) == 1)) or
+      Enum.all?(strings, &Regex.match?(~r/^[\w.-]+\.[a-z0-9]{1,5}$/, &1)) or
+      Enum.all?(strings, &(&1 == "" or String.starts_with?(&1, "/")))
+  end
+
+  # A parser's answer: an atom, `{:ok, ...}` or an error, as `{:ok, :md5, false}` or `{:ok, 12}` are.
   defp parsed?(value) when is_atom(value), do: true
-  defp parsed?({:ok, value}) when is_atom(value), do: true
-  defp parsed?(_value), do: false
+  defp parsed?({:ok, _value}), do: true
+  defp parsed?({:{}, _, [:ok | _]}), do: true
+  defp parsed?(value), do: error?(value)
 
   # --- alternative return types ---------------------------------------------------------------------------------
 
@@ -244,28 +256,47 @@ defmodule ArchTest.Code.Signatures do
 
   # Whether the branches return two kinds of value, one a tuple, list or map, as `int` and `{int, rest}` are. An
   # error, which any function may return, and a call, whose kind the code doesn't say, don't count.
+  # Two branches return different kinds of value when they return two kinds of literal, one a tuple, list or map, or
+  # when one returns a variable and another a tuple holding it, as `int` and `{int, rest}` do. A variable's kind isn't
+  # known otherwise, and a map update keeps the map's.
   defp kinds_differ?(tails) do
-    kinds =
-      tails
-      |> Enum.reject(&error?/1)
-      |> Enum.map(&kind/1)
-      |> Enum.reject(&(&1 == :unknown))
-      |> Enum.uniq()
+    tails = Enum.reject(tails, &error?/1)
+    kinds = tails |> Enum.map(&kind/1) |> Enum.reject(&(&1 == :unknown)) |> Enum.uniq()
 
-    length(kinds) > 1 and Enum.any?(kinds, &(&1 != :value))
+    returned =
+      for {name, meta, context} <- tails,
+          is_atom(name) and is_list(meta) and is_atom(context),
+          do: {name, context}
+
+    (length(kinds) > 1 and Enum.any?(kinds, &(&1 != :value))) or
+      Enum.any?(tails, &(tuple?(&1) and Enum.any?(vars(&1), fn var -> var in returned end)))
   end
 
+  defp tuple?({:{}, _, _}), do: true
+  defp tuple?({first, _second}) when not is_atom(first) or first not in [:%{}, :%], do: true
+  defp tuple?(_value), do: false
+
   defp kind({:{}, _, items}), do: {:tuple, length(items)}
-  defp kind({_first, _second}), do: {:tuple, 2}
-  defp kind(list) when is_list(list), do: :list
+  defp kind({:%{}, _, [{:|, _, _}]}), do: :unknown
   defp kind({:%{}, _, _}), do: :map
   defp kind({:%, _, _}), do: :map
-
-  defp kind({name, meta, context}) when is_atom(name) and is_list(meta) and is_atom(context),
-    do: :value
-
+  defp kind({first, _second}) when not is_atom(first) or first not in [:%{}, :%], do: {:tuple, 2}
+  defp kind(list) when is_list(list), do: :list
   defp kind(literal) when is_atom(literal) or is_number(literal) or is_binary(literal), do: :value
   defp kind(_expression), do: :unknown
+
+  defp vars(ast) do
+    ast
+    |> Macro.prewalk([], fn
+      {name, meta, context} = node, acc
+      when is_atom(name) and is_list(meta) and is_atom(context) ->
+        {node, [{name, context} | acc]}
+
+      node, acc ->
+        {node, acc}
+    end)
+    |> elem(1)
+  end
 
   defp error?(:error), do: true
   defp error?({:error, _}), do: true
