@@ -21,6 +21,53 @@ defmodule ArchTest.Code.Walker do
     |> Enum.reverse()
   end
 
+  @doc false
+  # Whether a GenServer callback returns the state it was given: `:kept` when every reply tuple each clause
+  # returns, such as `{:reply, value, state}` or `{:noreply, state}`, names the state parameter itself, and
+  # `:changed` when one returns anything else, or a clause builds no reply the code shows.
+  @spec state([tuple()]) :: :kept | :changed
+  def state(clauses) do
+    if Enum.all?(clauses, &keeps_state?/1), do: :kept, else: :changed
+  end
+
+  defp keeps_state?({_meta, args, _guards, body}) do
+    with {:ok, var} <- state_var(List.last(args)),
+         [_ | _] = returned <- returned_states(body) do
+      Enum.all?(returned, &(var_key(&1) == var))
+    else
+      _ -> false
+    end
+  end
+
+  defp state_var({:=, _, [left, right]}) do
+    with :error <- state_var(left), do: state_var(right)
+  end
+
+  defp state_var(ast) do
+    case var_key(ast) do
+      nil -> :error
+      key -> {:ok, key}
+    end
+  end
+
+  defp var_key({name, meta, context}) when is_atom(name) and is_list(meta) and is_atom(context),
+    do: {name, context}
+
+  defp var_key(_ast), do: nil
+
+  defp returned_states(body) do
+    body
+    |> Macro.prewalk([], fn
+      {:{}, _, [:reply, _reply, state | _]} = node, acc -> {node, [state | acc]}
+      {:{}, _, [:noreply, state | _]} = node, acc -> {node, [state | acc]}
+      {:noreply, state} = node, acc -> {node, [state | acc]}
+      {:{}, _, [:stop, _reason, state]} = node, acc -> {node, [state | acc]}
+      {:{}, _, [:stop, _reason, _reply, state]} = node, acc -> {node, [state | acc]}
+      node, acc -> {node, acc}
+    end)
+    |> elem(1)
+  end
+
   defp walk({:for, _meta, args}, state) when is_list(args), do: walk_for(args, state)
 
   defp walk({{:., _, [module, name]}, meta, args} = call, state)
@@ -129,7 +176,9 @@ defmodule ArchTest.Code.Walker do
   defp captured(_callee, _arity, _state), do: nil
 
   defp record(state, target, meta, args) do
-    add(state, target, meta, state.loop != nil and uses?(args, state.loop.vars))
+    state
+    |> add(target, meta, state.loop != nil and uses?(args, state.loop.vars))
+    |> with_receiver(args)
   end
 
   defp add(state, target, meta, per_item) do
@@ -137,11 +186,20 @@ defmodule ArchTest.Code.Walker do
       target: target,
       line: meta[:line],
       loop: state.loop && state.loop.label,
-      per_item: per_item
+      per_item: per_item,
+      receiver: nil
     }
 
     %{state | calls: [call | state.calls]}
   end
+
+  # The process a call such as `GenServer.call(MyApp.Cache, request)` or `send(MyApp.Cache, message)` talks to:
+  # its first argument, when that's a name rather than a pid.
+  defp with_receiver(%{calls: [call | rest]} = state, [receiver | _args])
+       when is_atom(receiver) and receiver not in [nil, true, false],
+       do: %{state | calls: [%{call | receiver: receiver} | rest]}
+
+  defp with_receiver(state, _args), do: state
 
   # A variable bound from the item is the item too, as `user_id` is in `user_id = order.user_id`.
   defp bind(%{loop: nil} = state, _pattern, _expression), do: state

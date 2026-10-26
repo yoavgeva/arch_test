@@ -39,8 +39,9 @@ defmodule ArchTest.Effects do
   followed, since the code doesn't say which module runs.
   """
 
-  alias ArchTest.{Assertions, Code, Collector, ModuleSet, Violation}
+  alias ArchTest.{Code, ModuleSet}
   alias ArchTest.Code.Effects, as: Reach
+  alias ArchTest.Code.Rules
 
   @queries [:db_read, :http]
   @work [:db_read, :db_write, :http, :network, :file, :system]
@@ -93,7 +94,7 @@ defmodule ArchTest.Effects do
   """
   @spec no_queries_in_loops(ModuleSet.t(), keyword()) :: :ok
   def no_queries_in_loops(%ModuleSet{} = subject, opts \\ []) do
-    {modules, code, effects} = analyze(subject, opts)
+    {modules, code, effects} = Rules.analyze(subject, opts)
 
     violations =
       for module <- modules,
@@ -102,16 +103,18 @@ defmodule ArchTest.Effects do
           call.per_item,
           {kind, path} <- List.wrap(query(call.target, effects)) do
         phrase = if kind == :http, do: "makes an HTTP request", else: "queries the database"
-        reaching = reaching([step(call) | path], call.target, module)
+        reaching = Rules.reaching([Rules.step(call) | path], call.target, module)
 
-        violation(code, "no_queries_in_loops", {module, name, arity}, call,
+        Rules.violation(code, "no_queries_in_loops", {module, name, arity},
+          line: call.line,
+          callee: call.target,
           message:
-            "#{phrase} once per item: #{call.loop} calls #{name(call.target, module)}#{reaching}",
+            "#{phrase} once per item: #{call.loop} calls #{Rules.name(call.target, module)}#{reaching}",
           fix: query_fix(kind)
         )
       end
 
-    report(violations, "no_queries_in_loops")
+    Rules.report(violations, "no_queries_in_loops")
   end
 
   @doc """
@@ -129,7 +132,7 @@ defmodule ArchTest.Effects do
   """
   @spec should_be_free_of_side_effects(ModuleSet.t(), keyword()) :: :ok
   def should_be_free_of_side_effects(%ModuleSet{} = subject, opts \\ []) do
-    {modules, code, effects} = analyze(subject, opts)
+    {modules, code, effects} = Rules.analyze(subject, opts)
     allowed = opts |> Keyword.get(:allow, []) |> Enum.flat_map(&Keyword.fetch!(@groups, &1))
     core = MapSet.new(modules)
 
@@ -138,21 +141,19 @@ defmodule ArchTest.Effects do
           {{^module, name, arity}, info} <- Code.functions_of(code, module),
           {_group, kinds} <- @groups,
           {call, path} <- List.wrap(leaving(info.calls, kinds -- allowed, core, effects)) do
-        kind =
-          Enum.find(
-            kinds,
-            &(Reach.seed(call.target) == &1 or Map.has_key?(effects[call.target] || %{}, &1))
-          )
+        kind = Rules.kind(call.target, kinds, effects)
+        reaching = Rules.reaching(path, call.target, module)
 
-        violation(code, "should_be_free_of_side_effects", {module, name, arity}, call,
-          message:
-            "#{@verbs[kind]} through #{name(call.target, module)}#{reaching(path, call.target, module)}",
+        Rules.violation(code, "should_be_free_of_side_effects", {module, name, arity},
+          line: call.line,
+          callee: call.target,
+          message: "#{@verbs[kind]} through #{Rules.name(call.target, module)}#{reaching}",
           fix:
             "move the call out to the code that uses the functional core, and pass its result in as an argument"
         )
       end
 
-    report(violations, "should_be_free_of_side_effects")
+    Rules.report(violations, "should_be_free_of_side_effects")
   end
 
   @doc """
@@ -165,41 +166,27 @@ defmodule ArchTest.Effects do
   """
   @spec no_work_in_init(ModuleSet.t(), keyword()) :: :ok
   def no_work_in_init(%ModuleSet{} = subject, opts \\ []) do
-    {modules, code, effects} = analyze(subject, opts)
+    {modules, code, effects} = Rules.analyze(subject, opts)
 
     violations =
       for module <- modules,
           GenServer in Code.behaviours(code, module),
           {{^module, :init, 1}, info} <- Code.functions_of(code, module),
           {call, path} <- List.wrap(first_effect(info.calls, @work, effects)) do
-        kind =
-          Enum.find(
-            @work,
-            &(Reach.seed(call.target) == &1 or Map.has_key?(effects[call.target] || %{}, &1))
-          )
+        kind = Rules.kind(call.target, @work, effects)
 
-        violation(code, "no_work_in_init", {module, :init, 1}, call,
+        Rules.violation(code, "no_work_in_init", {module, :init, 1},
+          line: call.line,
+          callee: call.target,
           message:
-            "#{@verbs[kind]} during init/1 through #{name(call.target, module)}" <>
-              "#{reaching(path, call.target, module)}, so its supervisor waits until the work is done",
+            "#{@verbs[kind]} during init/1 through #{Rules.name(call.target, module)}" <>
+              "#{Rules.reaching(path, call.target, module)}, so its supervisor waits until the work is done",
           fix:
             "return {:ok, state, {:continue, :load}} from init/1, and do the work in handle_continue/2"
         )
       end
 
-    report(violations, "no_work_in_init")
-  end
-
-  defp analyze(subject, opts) do
-    graph =
-      Keyword.get_lazy(opts, :graph, fn ->
-        Collector.build_graph(Keyword.get(opts, :app, :all), opts)
-      end)
-
-    modules = subject |> ModuleSet.resolve(graph) |> Enum.sort()
-    code = Code.load(modules, opts)
-
-    {modules, code, Reach.of(code)}
+    Rules.report(violations, "no_work_in_init")
   end
 
   # A query the target makes, with the path to it: the target itself, or what it reaches.
@@ -241,28 +228,16 @@ defmodule ArchTest.Effects do
     |> Enum.find_value(fn call ->
       cond do
         Reach.seed(call.target) in kinds ->
-          {call, [step(call)]}
+          {call, [Rules.step(call)]}
 
         kind = Enum.find(kinds, &Map.has_key?(effects[call.target] || %{}, &1)) ->
-          {call, [step(call) | effects[call.target][kind]]}
+          {call, [Rules.step(call) | effects[call.target][kind]]}
 
         true ->
           nil
       end
     end)
   end
-
-  defp reaching(path, target, module) do
-    case Reach.reached(path) do
-      ^target -> ""
-      reached -> ", which reaches #{name(reached, module)}"
-    end
-  end
-
-  defp name({module, name, arity}, module), do: "#{name}/#{arity}"
-  defp name({module, name, arity}, _caller), do: "#{inspect(module)}.#{name}/#{arity}"
-
-  defp step(call), do: %{target: call.target, line: call.line}
 
   defp query_fix(:http),
     do:
@@ -271,28 +246,4 @@ defmodule ArchTest.Effects do
   defp query_fix(_database),
     do:
       "load what the loop needs with one query before it, such as Repo.all with `where: x.id in ^ids`, or Repo.preload"
-
-  defp violation(code, rule, {module, name, arity}, call, details) do
-    {callee, callee_name, callee_arity} = call.target
-
-    %Violation{
-      type: :custom,
-      rule: rule,
-      module: module,
-      caller: module,
-      caller_function: {name, arity},
-      callee: callee,
-      callee_function: {callee_name, callee_arity},
-      file: Code.file(code, module),
-      line: call.line,
-      message: Keyword.fetch!(details, :message),
-      fix: Keyword.fetch!(details, :fix)
-    }
-  end
-
-  defp report(violations, rule) do
-    violations
-    |> Enum.sort_by(&{&1.file, &1.line, &1.caller_function})
-    |> Assertions.assert_no_violations_public(rule)
-  end
 end

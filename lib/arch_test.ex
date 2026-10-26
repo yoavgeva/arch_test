@@ -37,6 +37,7 @@ defmodule ArchTest do
   - `ArchTest.Metrics` — coupling/instability metrics
   - `ArchTest.Conventions` — pre-built Elixir convention rules
   - `ArchTest.Effects` — N+1 queries, pure functional cores and GenServer init, through every call
+  - `ArchTest.Processes` — one interface per process, GenServers with a reason to exist, supervision
   - `ArchTest.Collector` — BEAM dependency graph builder
   - `ArchTest.Pattern` — glob pattern matching
   """

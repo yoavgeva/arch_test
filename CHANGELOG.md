@@ -20,7 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `%ArchTest.Violation{}` gains `:rule` and `:fix`. Violations that set them
   print their file, line, function and fix. They aren't part of freeze keys, so
   existing baselines stay valid.
-- The effects guide.
+- `ArchTest.Processes`, from Elixir's process anti-patterns:
+  - `processes_have_one_interface/2` flags messages sent to a named process
+    from outside its module ("scattered process interfaces").
+  - `processes_hold_state/2` flags GenServers whose state never changes and
+    whose callbacks touch nothing outside them ("code organization by
+    process"), passing ones that own a resource they start or clean up.
+  - `processes_are_supervised/2` flags `spawn/1`, `Task.start/1`,
+    `GenServer.start/2` and `Agent.start/1` ("unsupervised processes").
+- The effects and processes guides.
 
 ## [0.3.1] - 2026-05-21
 

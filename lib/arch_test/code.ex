@@ -9,20 +9,34 @@ defmodule ArchTest.Code do
   alias ArchTest.Code.Walker
   alias ArchTest.Collector
 
-  defstruct modules: %{}, functions: %{}
+  defstruct modules: %{}, functions: %{}, scope: MapSet.new()
+
+  # A function another module's macro defined, as `use GenServer` defines default callbacks, is `injected`: its
+  # line is the `use`, not code the module's authors wrote.
+
+  # GenServer callbacks whose replies carry the process's next state.
+  @callbacks [{:handle_call, 3}, {:handle_cast, 2}, {:handle_info, 2}, {:handle_continue, 2}]
 
   @type key :: {module(), atom(), arity()}
   @type call :: %{
           target: key(),
           line: pos_integer() | nil,
           loop: String.t() | nil,
-          per_item: boolean()
+          per_item: boolean(),
+          receiver: atom() | nil
         }
-  @type function_info :: %{kind: :def | :defp, line: pos_integer() | nil, calls: [call()]}
+  @type function_info :: %{
+          kind: :def | :defp,
+          line: pos_integer() | nil,
+          calls: [call()],
+          state: :kept | :changed | nil,
+          injected: boolean()
+        }
   @type module_info :: %{file: String.t() | nil, behaviours: [module()]}
   @type t :: %__MODULE__{
           modules: %{module() => module_info()},
-          functions: %{key() => function_info()}
+          functions: %{key() => function_info()},
+          scope: MapSet.t(module())
         }
 
   @doc false
@@ -30,7 +44,9 @@ defmodule ArchTest.Code do
   # `opts`, or else the ebin directories that hold `modules`.
   @spec load([module()], keyword()) :: t()
   def load(modules, opts) do
-    reach(modules, beams_in_scope(modules, opts), %__MODULE__{})
+    beams = beams_in_scope(modules, opts)
+
+    reach(modules, beams, %__MODULE__{scope: beams |> Map.keys() |> MapSet.new()})
   end
 
   @doc false
@@ -159,8 +175,16 @@ defmodule ArchTest.Code do
           do: {name, arity}
 
     for {{name, arity}, kind, meta, clauses} <- definitions, kind in [:def, :defp], into: %{} do
+      state = if {name, arity} in @callbacks, do: Walker.state(clauses)
+
       {{module, name, arity},
-       %{kind: kind, line: meta[:line], calls: Walker.calls(clauses, module, locals)}}
+       %{
+         kind: kind,
+         line: meta[:line],
+         calls: Walker.calls(clauses, module, locals),
+         state: state,
+         injected: Keyword.has_key?(meta, :context)
+       }}
     end
   end
 end

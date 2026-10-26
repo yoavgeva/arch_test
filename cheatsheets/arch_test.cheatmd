@@ -241,6 +241,22 @@ should_be_free_of_side_effects(modules_matching("MyApp.Pricing.**"), app: :my_ap
 no_work_in_init(modules_matching("MyApp.**"), app: :my_app)
 ```
 
+## Processes
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.Processes
+
+# only MyApp.Cache sends MyApp.Cache messages
+processes_have_one_interface(modules_matching("MyApp.**"), app: :my_app)
+
+# GenServers change state, do I/O, or own a resource
+processes_hold_state(modules_matching("MyApp.**"), app: :my_app)
+
+# no spawn/1, Task.start/1, GenServer.start/2 outside a supervisor
+processes_are_supervised(modules_matching("MyApp.**"), app: :my_app)
+```
+
 ## Coupling Metrics
 
 ```elixir

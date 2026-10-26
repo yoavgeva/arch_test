@@ -23,6 +23,7 @@ Architecture rules as tests. Enforced from bytecode.
 | `define_slices` + `enforce_isolation` | Modulith bounded-context isolation |
 | `ArchTest.Conventions` | Ban `IO.puts`, `dbg`, bare `raise`, and more |
 | `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1` |
+| `ArchTest.Processes` | One interface per process, GenServers with a reason to exist, supervised processes |
 | `ArchTest.Metrics` | Coupling, instability, distance from main sequence |
 | `ArchTest.Freeze` | Baseline violations for gradual adoption |
 | `ArchTest.Collector.calls/2` | Function-level call metadata with file/line |
@@ -366,6 +367,49 @@ through what it calls, since its supervisor waits for it. Return
 The rules read the code from debug info, after macro expansion, so aliases,
 imports and `use` are resolved. See the [effects guide](guides/effects.md) for
 what counts as an effect and as a loop.
+
+---
+
+## Processes
+
+`ArchTest.Processes` checks three of Elixir's
+[process anti-patterns](https://hexdocs.pm/elixir/process-anti-patterns.html):
+
+```elixir
+defmodule MyApp.ProcessesTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.Processes
+
+  test "each process has one interface" do
+    processes_have_one_interface(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "GenServers hold state or do I/O" do
+    processes_hold_state(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "processes are supervised" do
+    processes_are_supervised(modules_matching("MyApp.**"), app: :my_app)
+  end
+end
+```
+
+- **`processes_have_one_interface`** flags `GenServer.call(MyApp.Cache, ...)`,
+  `GenServer.cast/2`, `Agent` calls and `send/2` to a process named after a
+  module, made outside that module. Give the module a function that sends the
+  message, and call that.
+- **`processes_hold_state`** flags a GenServer whose replies always keep the
+  state they were given and whose callbacks touch nothing outside it: a module
+  of plain functions would do, without making callers queue. One that changes
+  state, does I/O, or owns a resource it starts in `init/1` or cleans up in
+  `terminate/2` passes.
+- **`processes_are_supervised`** flags `spawn/1`, `Task.start/1`,
+  `GenServer.start/2` and `Agent.start/1`: nothing notices when such a process
+  crashes, and shutdown doesn't stop it. Use `Task.Supervisor.start_child/2` or
+  the supervision tree.
+
+See the [processes guide](guides/processes.md).
 
 ---
 
