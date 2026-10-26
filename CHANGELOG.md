@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `ArchTest.Effects.no_io_in_transactions/2` flags HTTP requests, network
+  calls, email and published messages inside `Repo.transaction/1`,
+  `Repo.transact/1` or `Ecto.Multi.run/3`, directly or through the functions
+  they call: a rollback can't take them back, and the transaction holds its
+  connection while they wait.
+- `ArchTest.Guardrails.no_swallowed_errors/2` flags catch-all handlers that
+  turn an error from the outside world into success, such as `rescue _ -> nil`
+  or `{:error, _} -> nil`, and `{:error, _}` results thrown away. Errors passed
+  on or recorded, parsers' errors, predicates, cleanup and Mix tasks pass.
+- Two effect kinds, `:mail` (Swoosh, Bamboo, `:gen_smtp_client`) and `:publish`
+  (`Phoenix.PubSub` and channel broadcasts, AMQP, Kafka), which
+  `should_be_free_of_side_effects/2` accepts in `allow:`.
+- Both new rules are part of `ArchTest.Recommended`.
+
+### Changed
+
+- `Phoenix.PubSub` broadcasts count as `:publish` rather than `:process`;
+  subscribing is still `:process`.
+
 ## [0.4.0] - 2026-10-26
 
 ### Added

@@ -11,7 +11,14 @@ defmodule ArchTest.Code.Walker do
   @doc false
   @spec calls([tuple()], module(), MapSet.t(), MapSet.t()) :: [ArchTest.Code.call()]
   def calls(clauses, module, locals, sql_writers \\ MapSet.new()) do
-    state = %{module: module, locals: locals, sql_writers: sql_writers, loop: nil, calls: []}
+    state = %{
+      module: module,
+      locals: locals,
+      sql_writers: sql_writers,
+      loop: nil,
+      transaction: nil,
+      calls: []
+    }
 
     clauses
     |> Enum.reduce(state, fn {_meta, _args, guards, body}, acc ->
@@ -129,7 +136,11 @@ defmodule ArchTest.Code.Walker do
        when is_atom(module) and is_atom(name) and is_list(args) do
     state = record(state, {module, name, length(args)}, meta, args)
 
-    if loop?(module, name, args), do: walk_loop(call, state), else: walk(args, state)
+    cond do
+      transaction?(module, name) -> walk_transaction(call, state)
+      loop?(module, name, args) -> walk_loop(call, state)
+      true -> walk(args, state)
+    end
   end
 
   defp walk({:&, meta, [{:/, _, [callee, arity]}]}, state) when is_integer(arity) do
@@ -220,6 +231,35 @@ defmodule ArchTest.Code.Walker do
 
   defp in_loop(state, loop, walker), do: %{walker.(%{state | loop: loop}) | loop: state.loop}
 
+  # A function given to a repo's transaction/1 or transact/1, or to Ecto.Multi.run, runs inside a transaction.
+  # Which module is a repo is for the rules to say: the walker marks any transaction/1 and transact/1.
+  defp transaction?(Ecto.Multi, :run), do: true
+  defp transaction?(_module, name), do: name in [:transaction, :transact]
+
+  defp walk_transaction({{:., _, [module, name]}, meta, args}, state) do
+    opener = %{target: {module, name, length(args)}, line: meta[:line]}
+    Enum.reduce(args, state, &walk_transaction_argument(&1, opener, &2))
+  end
+
+  defp walk_transaction_argument({:fn, _, clauses}, opener, state) do
+    Enum.reduce(clauses, state, fn {:->, _, [_params, body]}, acc ->
+      in_transaction(acc, opener, &walk(body, &1))
+    end)
+  end
+
+  defp walk_transaction_argument({:&, meta, [{:/, _, [callee, arity]}]}, opener, state)
+       when is_integer(arity) do
+    case captured(callee, arity, state) do
+      nil -> state
+      target -> in_transaction(state, opener, &add(&1, target, meta, false))
+    end
+  end
+
+  defp walk_transaction_argument(argument, _opener, state), do: walk(argument, state)
+
+  defp in_transaction(state, opener, walker),
+    do: %{walker.(%{state | transaction: opener}) | transaction: state.transaction}
+
   defp captured({{:., _, [module, name]}, _, []}, arity, _state)
        when is_atom(module) and is_atom(name),
        do: {module, name, arity}
@@ -281,7 +321,8 @@ defmodule ArchTest.Code.Walker do
       loop: state.loop && state.loop.label,
       per_item: per_item,
       receiver: nil,
-      writes_sql: false
+      writes_sql: false,
+      inside: state.transaction
     }
 
     %{state | calls: [call | state.calls]}

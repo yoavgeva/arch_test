@@ -22,10 +22,10 @@ Architecture and design rules as tests. Enforced from bytecode.
 | `define_onion` + `enforce_onion_rules` | Onion / hexagonal architecture |
 | `define_slices` + `enforce_isolation` | Modulith bounded-context isolation |
 | `ArchTest.Conventions` | Ban `IO.puts`, `dbg`, bare `raise`, and more |
-| `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1` |
+| `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1`, I/O in transactions |
 | `ArchTest.Processes` | One interface per process, GenServers with a reason to exist, supervised processes |
 | `ArchTest.TestCode` | Tests that use their subject, mock only I/O, don't sleep, and keep async tests isolated |
-| `ArchTest.Guardrails` | No silenced warnings, no stubs, nothing public only for tests |
+| `ArchTest.Guardrails` | No silenced warnings, no stubs, nothing public only for tests, no swallowed errors |
 | `ArchTest.Recommended` | The design rules worth holding any project to, as one test |
 | `ArchTest.Metrics` | Coupling, instability, distance from main sequence |
 | `ArchTest.Freeze` | Baseline violations for gradual adoption |
@@ -336,6 +336,10 @@ defmodule MyApp.EffectsTest do
   test "GenServers start fast" do
     no_work_in_init(modules_matching("MyApp.**"), app: :my_app)
   end
+
+  test "transactions stay in the database" do
+    no_io_in_transactions(modules_matching("MyApp.**"), app: :my_app)
+  end
 end
 ```
 
@@ -367,6 +371,12 @@ Date.utc_today/0` — and takes `allow: [:clock]` for effects you accept.
 **`no_work_in_init`** flags a GenServer whose `init/1` does I/O, directly or
 through what it calls, since its supervisor waits for it. Return
 `{:ok, state, {:continue, :load}}` and do the work in `handle_continue/2`.
+
+**`no_io_in_transactions`** flags HTTP requests, email and published messages
+inside `Repo.transaction/1` or `Ecto.Multi.run/3`, directly or through what
+they call. A rollback can't take them back, and the transaction holds its
+connection while they wait. Do them after the commit, or through an outbox or
+Oban job.
 
 The rules read the code from debug info, after macro expansion, so aliases,
 imports and `use` are resolved. See the [effects guide](guides/effects.md) for
@@ -485,6 +495,10 @@ defmodule MyApp.GuardrailsTest do
   test "nothing is public only for tests" do
     no_functions_only_tests_call(modules_matching("MyApp.**"), app: :my_app)
   end
+
+  test "errors reach their callers" do
+    no_swallowed_errors(modules_matching("MyApp.**"), app: :my_app)
+  end
 end
 ```
 
@@ -495,14 +509,18 @@ end
   `{:error, :not_implemented}`.
 - **`no_functions_only_tests_call`** flags `@doc false` functions that only
   tests call: made public to be tested. Behaviour callbacks are skipped.
+- **`no_swallowed_errors`** flags `rescue _ -> nil`, `{:error, _} -> nil` and
+  the like, and `{:error, _}` results thrown away, when the error comes from the
+  database, HTTP, files or another outside call. Handlers of specific errors,
+  errors passed on or recorded, parsers, predicates and cleanup pass.
 
 ---
 
 ## Recommended design rules
 
 `ArchTest.Recommended` runs the design rules worth holding any project to —
-N+1 queries, GenServer init, process interfaces and supervision, the test
-rules and the guardrails — and reports what each finds in one test:
+N+1 queries, GenServer init, I/O in transactions, process interfaces and
+supervision, the test rules and the guardrails — and reports what each finds in one test:
 
 ```elixir
 test "recommended design rules" do

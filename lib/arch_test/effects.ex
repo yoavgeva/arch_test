@@ -1,7 +1,7 @@
 defmodule ArchTest.Effects do
   @moduledoc """
-  Rules about what code does to the outside world: the database, HTTP, the network, files, the console, other
-  processes, the operating system, the clock, randomness and the environment.
+  Rules about what code does to the outside world: the database, HTTP, the network, mail, published messages, files,
+  the console, other processes, the operating system, the clock, randomness and the environment.
 
   They follow every call, not only the ones written in a function: `Orders.with_users/1` calling
   `Accounts.get_user!/1` once per order queries the database once per order, though no `Repo` call appears in it.
@@ -26,6 +26,10 @@ defmodule ArchTest.Effects do
         test "GenServers start fast" do
           no_work_in_init(modules_matching("MyApp.**"), app: :my_app)
         end
+
+        test "transactions stay in the database" do
+          no_io_in_transactions(modules_matching("MyApp.**"), app: :my_app)
+        end
       end
 
   Each violation names the file and line, the path to the effect, and how to fix it.
@@ -33,7 +37,8 @@ defmodule ArchTest.Effects do
   ## What counts
 
   An effect is a call to a library that touches the outside world, such as `Ecto.Repo.Queryable` (behind every Ecto
-  repo), `Req`, `Finch`, `HTTPoison`, `Tesla`, `:httpc`, `File`, `IO.puts/1`, `System.cmd/3`, `GenServer.call/2`,
+  repo), `Req`, `Finch`, `HTTPoison`, `Tesla`, `:httpc`, `Swoosh.Mailer`, `Phoenix.PubSub.broadcast/3`, `File`,
+  `IO.puts/1`, `System.cmd/3`, `GenServer.call/2`,
   `DateTime.utc_now/0`, `:rand` or `System.get_env/1`, or a call to a project function that has one. Building a
   value, as `Req.new/1` or `Ecto.Query.from/2` do, isn't an effect. Calls through a module held in a variable aren't
   followed, since the code doesn't say which module runs.
@@ -44,11 +49,21 @@ defmodule ArchTest.Effects do
   alias ArchTest.Code.Rules
 
   @queries [:db_read, :http]
-  @work [:db_read, :db_write, :http, :network, :file, :system]
+  @work [:db_read, :db_write, :http, :network, :mail, :file, :system]
+  # What a rollback can't undo, and what a transaction shouldn't wait on.
+  @outside [:http, :network, :mail, :publish]
+  @outside_verbs %{
+    http: "makes an HTTP request",
+    network: "uses the network",
+    mail: "sends email",
+    publish: "publishes a message"
+  }
   @groups [
     database: [:db_read, :db_write],
     http: [:http],
     network: [:network],
+    mail: [:mail],
+    publish: [:publish],
     file: [:file],
     console: [:console],
     system: [:system],
@@ -62,6 +77,8 @@ defmodule ArchTest.Effects do
     db_write: "touches the database",
     http: "makes HTTP requests",
     network: "uses the network",
+    mail: "sends email",
+    publish: "publishes messages",
     file: "touches files",
     console: "writes to the console",
     system: "runs operating-system commands",
@@ -158,6 +175,43 @@ defmodule ArchTest.Effects do
   end
 
   @doc """
+  Asserts that no function in `subject` reaches outside the database inside a transaction.
+
+  Inside a function given to a repo's `transaction/1,2` or `transact/1,2`, or to `Ecto.Multi.run`, a call that
+  makes an HTTP request, uses the network, sends email or publishes a message, directly or through the functions it
+  calls, is flagged. The transaction holds its database connection while it waits, which can drain the pool, and a
+  rollback can't undo what went out. Do it after the commit, or record it in the transaction, as an outbox row or an
+  Oban job, and do it after.
+  """
+  @spec no_io_in_transactions(ModuleSet.t(), keyword()) :: :ok
+  def no_io_in_transactions(%ModuleSet{} = subject, opts \\ []) do
+    {modules, code, effects} = Rules.analyze(subject, opts)
+
+    violations =
+      for module <- modules,
+          {{^module, name, arity}, info} <- Code.functions_of(code, module),
+          %{inside: %{} = opener} = call <- info.calls,
+          transaction?(opener.target, code, effects),
+          {call, path} <- List.wrap(first_effect([call], @outside, effects)) do
+        kind = Rules.kind(call.target, @outside, effects)
+
+        Rules.violation(code, "no_io_in_transactions", {module, name, arity},
+          line: call.line,
+          callee: call.target,
+          message:
+            "#{@outside_verbs[kind]} inside #{Rules.name(opener.target, module)} through " <>
+              "#{Rules.name(call.target, module)}#{Rules.reaching(path, call.target, module)}: " <>
+              "the transaction holds its database connection while it waits, and a rollback can't undo it",
+          fix:
+            "do it after the transaction commits, or record it in the transaction, as an outbox row or an " <>
+              "Oban job, and do it after the commit"
+        )
+      end
+
+    Rules.report(violations, "no_io_in_transactions")
+  end
+
+  @doc """
   Asserts that no GenServer in `subject` does I/O in `init/1`.
 
   I/O is the database, HTTP, the network, files or the operating system, directly or through the functions
@@ -189,6 +243,20 @@ defmodule ArchTest.Effects do
 
     Rules.report(violations, "no_work_in_init")
   end
+
+  # A call that opens a transaction: Ecto.Multi.run, or transaction/transact on a repo, which declares the Ecto.Repo
+  # behaviour or reaches Ecto.Repo.Transaction, as a facade over one does.
+  defp transaction?({Ecto.Multi, :run, _arity}, _code, _effects), do: true
+
+  defp transaction?({module, _name, _arity} = target, code, effects) do
+    Ecto.Repo in Code.behaviours(code, module) or module == Ecto.Repo.Transaction or
+      reaches_transaction?(effects[target][:db_write])
+  end
+
+  defp reaches_transaction?([_ | _] = path),
+    do: path |> List.last() |> Map.fetch!(:target) |> elem(0) == Ecto.Repo.Transaction
+
+  defp reaches_transaction?(_path), do: false
 
   # A query the target makes, with the path to it: the target itself, or what it reaches.
   defp query(target, effects) do

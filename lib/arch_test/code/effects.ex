@@ -12,6 +12,8 @@ defmodule ArchTest.Code.Effects do
           | :db_write
           | :http
           | :network
+          | :mail
+          | :publish
           | :file
           | :console
           | :system
@@ -27,6 +29,8 @@ defmodule ArchTest.Code.Effects do
     :db_write,
     :http,
     :network,
+    :mail,
+    :publish,
     :file,
     :console,
     :system,
@@ -68,7 +72,8 @@ defmodule ArchTest.Code.Effects do
     :persistent_term => :process,
     :global => :process,
     :pg => :process,
-    Port => :system
+    Port => :system,
+    :gen_smtp_client => :mail
   }
 
   # Seeds that are only some of a library's functions: the rest build values, as `Req.new/1` does.
@@ -152,9 +157,27 @@ defmodule ArchTest.Code.Effects do
       apply_after: :process,
       tc: :clock
     },
-    Phoenix.PubSub =>
-      {~w(broadcast broadcast! broadcast_from broadcast_from! local_broadcast subscribe unsubscribe)a,
-       :process},
+    Phoenix.PubSub => %{
+      broadcast: :publish,
+      broadcast!: :publish,
+      broadcast_from: :publish,
+      broadcast_from!: :publish,
+      local_broadcast: :publish,
+      local_broadcast_from: :publish,
+      direct_broadcast: :publish,
+      direct_broadcast!: :publish,
+      subscribe: :process,
+      unsubscribe: :process
+    },
+    # What an endpoint's broadcast/3 and a channel's broadcast!/3 call.
+    Phoenix.Channel.Server =>
+      {~w(broadcast broadcast! broadcast_from broadcast_from! local_broadcast local_broadcast_from)a,
+       :publish},
+    Swoosh.Mailer => {~w(deliver deliver! deliver_many)a, :mail},
+    Bamboo.Mailer => {~w(deliver_now deliver_now! deliver_later deliver_later!)a, :mail},
+    AMQP.Basic => {~w(publish)a, :publish},
+    :brod => {~w(produce produce_sync produce_sync_offset)a, :publish},
+    KafkaEx => {~w(produce)a, :publish},
     DateTime => {~w(utc_now now now!)a, :clock},
     NaiveDateTime => {~w(utc_now local_now)a, :clock},
     Date => {~w(utc_today)a, :clock},

@@ -1,7 +1,8 @@
 # Effects
 
-`ArchTest.Effects` checks what your code does to the outside world: the database, HTTP, the network, files, the
-console, other processes, the operating system, the clock, randomness and the environment. It follows every call,
+`ArchTest.Effects` checks what your code does to the outside world: the database, HTTP, the network, mail,
+published messages, files, the console, other processes, the operating system, the clock, randomness and the
+environment. It follows every call,
 so `Orders.with_users/1` calling `Accounts.get_user!/1` once per order queries the database once per order, though
 no `Repo` call appears in it. A check that reads one file at a time can't see that.
 
@@ -25,6 +26,10 @@ defmodule MyApp.EffectsTest do
 
   test "GenServers start fast" do
     no_work_in_init(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "transactions stay in the database" do
+    no_io_in_transactions(modules_matching("MyApp.**"), app: :my_app)
   end
 end
 ```
@@ -87,8 +92,8 @@ Calls between core functions aren't reported, since the call that leaves the cor
   → fix: move the call out to the code that uses the functional core, and pass its result in as an argument
 ```
 
-`allow:` lists effects the core may have, from `:database`, `:http`, `:network`, `:file`, `:console`, `:system`,
-`:process`, `:clock`, `:random` and `:env`:
+`allow:` lists effects the core may have, from `:database`, `:http`, `:network`, `:mail`, `:publish`, `:file`,
+`:console`, `:system`, `:process`, `:clock`, `:random` and `:env`:
 
 ```elixir
 should_be_free_of_side_effects(modules_matching("MyApp.Pricing.**"), app: :my_app, allow: [:clock])
@@ -115,7 +120,35 @@ Starting processes, scheduling messages and reading configuration aren't I/O.
 
 ---
 
-## 5. What counts as an effect
+## 5. No I/O in transactions
+
+`no_io_in_transactions/2` flags a call inside a transaction that makes an HTTP request, uses the network, sends
+email or publishes a message, directly or through what it calls. A rollback can't take back what went out: the
+customer has the receipt for an order that was never saved, or subscribers heard about a change that didn't happen.
+And the transaction holds its database connection while it waits on the other side, so a slow API drains the pool.
+
+```elixir
+# flagged
+Repo.transaction(fn ->
+  order = Repo.insert!(changeset)
+  Mailer.deliver(receipt(order))
+  order
+end)
+
+# fixed: send it after the commit
+with {:ok, order} <- Repo.transaction(fn -> Repo.insert!(changeset) end) do
+  Mailer.deliver(receipt(order))
+  {:ok, order}
+end
+```
+
+A transaction is a function given to a repo's `transaction/1,2` or `transact/1,2`, or to `Ecto.Multi.run/3,5`. When
+the work must happen exactly once with the data, record it in the transaction, as an outbox row or an Oban job, and
+do it after the commit.
+
+---
+
+## 6. What counts as an effect
 
 An effect is a call to a library that touches the outside world, or to a project function that makes one:
 
@@ -124,10 +157,12 @@ An effect is a call to a library that touches the outside world, or to a project
 | database | Ecto repos (through `Ecto.Repo.Queryable`, `Ecto.Repo.Schema` and `Ecto.Adapters.SQL`), Postgrex, MyXQL, Redix, Mongo, Xandra |
 | HTTP | `Req`, `Finch`, `HTTPoison`, `Tesla`, `Mint`, `:httpc`, `:hackney`, `:gun` |
 | network | `:gen_tcp`, `:gen_udp`, `:ssl`, host name lookups |
+| mail | `Swoosh.Mailer`, `Bamboo.Mailer`, `:gen_smtp_client` |
+| publish | `Phoenix.PubSub` and endpoint broadcasts, `AMQP.Basic.publish/4`, `:brod` and `KafkaEx` produce |
 | files | `File`, `:file`, `:filelib`, `Path.wildcard/2` |
 | console | `IO.puts/1`, `IO.inspect/2`, `IO.gets/1`, `:io.format/2` and the like |
 | system | `System.cmd/3`, `Port`, `:os.cmd/1` |
-| process | `send/2`, `spawn`, `GenServer`, `Agent`, `Task`, `Registry`, `:ets`, `:persistent_term`, `Phoenix.PubSub` |
+| process | `send/2`, `spawn`, `GenServer`, `Agent`, `Task`, `Registry`, `:ets`, `:persistent_term`, `Phoenix.PubSub.subscribe/2` |
 | clock | `DateTime.utc_now/0`, `Date.utc_today/0`, `System.system_time/0` and the like |
 | randomness | `:rand`, `:crypto.strong_rand_bytes/1`, `Enum.random/1`, `Ecto.UUID.generate/0` |
 | environment | `System.get_env/1`, `Application.get_env/2` and the like |

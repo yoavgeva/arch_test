@@ -6,7 +6,7 @@ defmodule ArchTest.Code do
   # `MyApp.Repo.get!/2`. Reading starts at the modules a rule checks and follows their calls into the other
   # modules in scope, so a rule reads only the code it can reach.
 
-  alias ArchTest.Code.Walker
+  alias ArchTest.Code.{Errors, Walker}
   alias ArchTest.Collector
 
   defstruct modules: %{}, functions: %{}, scope: MapSet.new()
@@ -24,7 +24,8 @@ defmodule ArchTest.Code do
           loop: String.t() | nil,
           per_item: boolean(),
           receiver: atom() | nil,
-          writes_sql: boolean()
+          writes_sql: boolean(),
+          inside: %{target: key(), line: pos_integer() | nil} | nil
         }
   @type function_info :: %{
           kind: :def | :defp,
@@ -33,7 +34,11 @@ defmodule ArchTest.Code do
           state: :kept | :changed | nil,
           injected: boolean(),
           stub: String.t() | nil,
-          references: MapSet.t(module())
+          references: MapSet.t(module()),
+          swallows: [Errors.swallow()],
+          discards: [{key(), pos_integer() | nil}],
+          tails: Errors.tails(),
+          dynamic: boolean()
         }
   @type module_info :: %{
           file: String.t() | nil,
@@ -257,7 +262,11 @@ defmodule ArchTest.Code do
          state: state,
          injected: Keyword.has_key?(meta, :context),
          stub: Walker.stub(clauses),
-         references: Walker.references(clauses)
+         references: Walker.references(clauses),
+         swallows: Errors.swallows(clauses, module, locals),
+         discards: Errors.discards(clauses, module, locals),
+         tails: Errors.tails(clauses, module, locals),
+         dynamic: Errors.dynamic?(clauses)
        }}
     end
   end

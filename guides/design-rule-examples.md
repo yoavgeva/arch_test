@@ -121,6 +121,52 @@ end
 
 </details>
 
+### `no_io_in_transactions`
+
+`ArchTest.Effects.no_io_in_transactions(modules_matching("Shop.**"))`
+
+A rollback can't take back an email, and the transaction holds its database connection while the mail server
+answers.
+
+```elixir
+defmodule Shop.Orders do
+  alias Shop.{Mailer, Repo}
+
+  def place(order, payment) do
+    Repo.transaction(fn ->
+      placed = Repo.insert!(order)
+      Repo.insert!(%{payment | order_id: placed.id})
+      # ✗ sends the receipt before the order is committed, even if it rolls back
+      Mailer.deliver(placed.email)
+      placed
+    end)
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Orders do
+  alias Shop.{Mailer, Repo}
+
+  def place(order, payment) do
+    with {:ok, placed} <- Repo.transaction(fn -> save(order, payment) end),
+         {:ok, _email} <- Mailer.deliver(placed.email) do
+      {:ok, placed}
+    end
+  end
+
+  defp save(order, payment) do
+    placed = Repo.insert!(order)
+    Repo.insert!(%{payment | order_id: placed.id})
+    placed
+  end
+end
+```
+
+</details>
+
 ## Processes
 
 ### `processes_have_one_interface`
@@ -502,6 +548,38 @@ defmodule Shop.CartTest do
 
   test "totals with tax, to the cent" do
     assert Shop.Cart.total([1.01]) == 1.21
+  end
+end
+```
+
+</details>
+
+### `no_swallowed_errors`
+
+`ArchTest.Guardrails.no_swallowed_errors(modules_matching("Shop.**"))`
+
+A failure turned into `nil` looks like an answer: a rate service that's down reads as a currency with no rate.
+
+```elixir
+defmodule Shop.Rates do
+  def fetch(currency) do
+    case Req.get("https://rates.example.com/" <> currency) do
+      {:ok, response} -> response.body
+      # ✗ the caller can't tell a failed request from a missing rate
+      {:error, _reason} -> nil
+    end
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Rates do
+  def fetch(currency) do
+    with {:ok, response} <- Req.get("https://rates.example.com/" <> currency) do
+      {:ok, response.body}
+    end
   end
 end
 ```

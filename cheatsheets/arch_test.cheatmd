@@ -239,6 +239,9 @@ should_be_free_of_side_effects(modules_matching("MyApp.Pricing.**"), app: :my_ap
 
 # no I/O in GenServer init/1: use handle_continue/2
 no_work_in_init(modules_matching("MyApp.**"), app: :my_app)
+
+# no HTTP, email or PubSub inside Repo.transaction/1 or Ecto.Multi.run/3
+no_io_in_transactions(modules_matching("MyApp.**"), app: :my_app)
 ```
 
 ## Processes
@@ -290,6 +293,9 @@ no_stubs(modules_matching("MyApp.**"), app: :my_app)
 
 # no @doc false function only tests call
 no_functions_only_tests_call(modules_matching("MyApp.**"), app: :my_app)
+
+# no rescue _ -> nil or {:error, _} -> nil around I/O
+no_swallowed_errors(modules_matching("MyApp.**"), app: :my_app)
 ```
 
 ## Recommended Design Rules

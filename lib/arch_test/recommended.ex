@@ -11,7 +11,8 @@ defmodule ArchTest.Recommended do
         end
       end
 
-  They are `ArchTest.Effects.no_queries_in_loops/2` and `no_work_in_init/2`, `ArchTest.Processes`'
+  They are `ArchTest.Effects.no_queries_in_loops/2`, `no_work_in_init/2` and `no_io_in_transactions/2`,
+  `ArchTest.Processes`'
   `processes_have_one_interface/2` and `processes_are_supervised/2`, all of `ArchTest.TestCode`, and all of
   `ArchTest.Guardrails`. `ArchTest.Effects.should_be_free_of_side_effects/2` and
   `ArchTest.Processes.processes_hold_state/2` aren't: which modules are a functional core, and which processes may
@@ -38,6 +39,7 @@ defmodule ArchTest.Recommended do
   @rules [
     no_queries_in_loops: &Effects.no_queries_in_loops/2,
     no_work_in_init: &Effects.no_work_in_init/2,
+    no_io_in_transactions: &Effects.no_io_in_transactions/2,
     processes_have_one_interface: &Processes.processes_have_one_interface/2,
     processes_are_supervised: &Processes.processes_are_supervised/2,
     tests_use_their_subject: &TestCode.tests_use_their_subject/2,
@@ -46,7 +48,8 @@ defmodule ArchTest.Recommended do
     async_tests_share_no_state: &TestCode.async_tests_share_no_state/2,
     no_suppressions: &Guardrails.no_suppressions/2,
     no_stubs: &Guardrails.no_stubs/2,
-    no_functions_only_tests_call: &Guardrails.no_functions_only_tests_call/2
+    no_functions_only_tests_call: &Guardrails.no_functions_only_tests_call/2,
+    no_swallowed_errors: &Guardrails.no_swallowed_errors/2
   ]
 
   @doc """

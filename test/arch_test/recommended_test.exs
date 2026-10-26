@@ -61,6 +61,7 @@ defmodule ArchTest.RecommendedTest do
     assert Recommended.rules() == [
              :no_queries_in_loops,
              :no_work_in_init,
+             :no_io_in_transactions,
              :processes_have_one_interface,
              :processes_are_supervised,
              :tests_use_their_subject,
@@ -69,7 +70,8 @@ defmodule ArchTest.RecommendedTest do
              :async_tests_share_no_state,
              :no_suppressions,
              :no_stubs,
-             :no_functions_only_tests_call
+             :no_functions_only_tests_call,
+             :no_swallowed_errors
            ]
   end
 

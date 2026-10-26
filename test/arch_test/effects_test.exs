@@ -7,6 +7,7 @@ defmodule ArchTest.EffectsTest do
   @orders "lib/effects_fixture/orders.ex"
   @core "lib/effects_fixture/core.ex"
   @servers "lib/effects_fixture/servers.ex"
+  @billing "lib/effects_fixture/billing.ex"
   @query_fix "load what the loop needs with one query before it, such as Repo.all with `where: x.id in ^ids`, " <>
                "or Repo.preload"
 
@@ -15,12 +16,13 @@ defmodule ArchTest.EffectsTest do
       {"lib/effects_fixture/repo.ex",
        """
        defmodule EffectsFixture.Repo do
-         @compile {:no_warn_undefined, [Ecto.Repo.Queryable, Ecto.Repo.Schema, Ecto.Adapters.SQL]}
+         @compile {:no_warn_undefined, [Ecto.Repo.Queryable, Ecto.Repo.Schema, Ecto.Repo.Transaction, Ecto.Adapters.SQL]}
 
          def all(queryable, opts \\\\ []), do: Ecto.Repo.Queryable.all(__MODULE__, queryable, opts)
          def get!(queryable, id, opts \\\\ []), do: Ecto.Repo.Queryable.get!(__MODULE__, queryable, id, opts)
          def insert(struct, opts \\\\ []), do: Ecto.Repo.Schema.insert(__MODULE__, struct, opts)
          def query!(sql, params), do: Ecto.Adapters.SQL.query!(__MODULE__, sql, params)
+         def transaction(fun, opts \\\\ []), do: Ecto.Repo.Transaction.transaction(__MODULE__, fun, opts)
        end
        """},
       {"lib/effects_fixture/accounts.ex",
@@ -89,6 +91,46 @@ defmodule ArchTest.EffectsTest do
          defp update_sql(table), do: "UPDATE \#{table} SET n = n + 1 WHERE id = $1"
 
          defp load(id), do: Repo.get!(:orders, id)
+       end
+       """},
+      {@billing,
+       """
+       defmodule EffectsFixture.Mailer do
+         @compile {:no_warn_undefined, [Swoosh.Mailer]}
+
+         def deliver(email), do: Swoosh.Mailer.deliver(email, [])
+       end
+
+       defmodule EffectsFixture.Billing do
+         @compile {:no_warn_undefined, [Ecto.Multi, Phoenix.PubSub]}
+         alias EffectsFixture.{Mailer, Repo}
+
+         def charge(order) do
+           Repo.transaction(fn ->
+             Repo.insert(order)
+             :httpc.request(order.payment_url)
+           end)
+         end
+
+         def place(order) do
+           Repo.transaction(fn ->
+             Repo.insert(order)
+             notify(order)
+           end)
+         end
+
+         def announce(multi, order) do
+           Ecto.Multi.run(multi, :announce, fn _repo, _changes ->
+             {:ok, Phoenix.PubSub.broadcast(EffectsFixture.PubSub, "orders", order)}
+           end)
+         end
+
+         def place_then_notify(order) do
+           {:ok, placed} = Repo.transaction(fn -> Repo.insert(order) end)
+           notify(placed)
+         end
+
+         defp notify(order), do: Mailer.deliver(order.email)
        end
        """},
       {@core,
@@ -247,6 +289,33 @@ defmodule ArchTest.EffectsTest do
         )
 
       assert Enum.map(violations, & &1.caller_function) == [{:number, 1}]
+    end
+  end
+
+  describe "no_io_in_transactions/2" do
+    test "flags calls inside a transaction that reach outside the database, and passes ones after the commit" do
+      violations = capture(&Effects.no_io_in_transactions/2, "EffectsFixture.Billing")
+
+      held =
+        ": the transaction holds its database connection while it waits, and a rollback can't undo it"
+
+      assert Enum.map(violations, &{&1.caller_function, &1.line, &1.message}) == [
+               {{:charge, 1}, 14,
+                "makes an HTTP request inside EffectsFixture.Repo.transaction/1 through :httpc.request/1" <>
+                  held},
+               {{:place, 1}, 21,
+                "sends email inside EffectsFixture.Repo.transaction/1 through notify/1, " <>
+                  "which reaches Swoosh.Mailer.deliver/2" <> held},
+               {{:announce, 2}, 27,
+                "publishes a message inside Ecto.Multi.run/3 through Phoenix.PubSub.broadcast/3" <>
+                  held}
+             ]
+
+      assert hd(violations).file == @billing
+
+      assert hd(violations).fix ==
+               "do it after the transaction commits, or record it in the transaction, as an outbox row or an " <>
+                 "Oban job, and do it after the commit"
     end
   end
 

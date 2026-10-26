@@ -1,8 +1,9 @@
 defmodule ArchTest.Guardrails do
   @moduledoc """
   Rules against shortcuts that get a build green without doing the work: warnings silenced instead of fixed,
-  functions that stand in for code nobody wrote, and private functions made public so tests can call them. AI
-  agents take these shortcuts to finish a task, and they pass review at a glance.
+  functions that stand in for code nobody wrote, private functions made public so tests can call them, and errors
+  turned into `nil` so nothing crashes. AI agents take these shortcuts to finish a task, and they pass review at a
+  glance.
 
   ## Usage
 
@@ -22,11 +23,15 @@ defmodule ArchTest.Guardrails do
         test "nothing is public only for tests" do
           no_functions_only_tests_call(modules_matching("MyApp.**"), app: :my_app)
         end
+
+        test "errors reach their callers" do
+          no_swallowed_errors(modules_matching("MyApp.**"), app: :my_app)
+        end
       end
   """
 
   alias ArchTest.{Code, ModuleSet, TestSource, Violation}
-  alias ArchTest.Code.Rules
+  alias ArchTest.Code.{Errors, Rules}
   alias Elixir.Code.Typespec
 
   @comments [
@@ -37,6 +42,19 @@ defmodule ArchTest.Guardrails do
 
   # Functions supervisors and frameworks call by convention, through a child spec rather than the code.
   @conventional [:child_spec, :start_link]
+  # Effects whose errors a caller needs to know about.
+  @outside [:db_read, :db_write, :http, :network, :mail, :publish, :file, :system]
+  # Functions that release something: their errors leave nothing to recover.
+  @releases [
+    :close,
+    :stop,
+    :shutdown,
+    :cancel,
+    :terminate_child,
+    :unlink,
+    :demonitor,
+    :disconnect
+  ]
 
   @doc false
   defmacro __using__(_opts) do
@@ -83,6 +101,51 @@ defmodule ArchTest.Guardrails do
       end
 
     Rules.report(violations, "no_suppressions")
+  end
+
+  @doc """
+  Asserts that no function in `subject` swallows errors from the outside world, so its callers can't tell it failed.
+
+  Flags, when the error comes from the database, HTTP, the network, files, mail, publishing or the operating system,
+  directly or through the functions the code calls:
+
+  - a catch-all handler whose result looks like success: `rescue _ -> nil`, a `catch` of anything, or a `case` or
+    `with`-`else` clause matching any `{:error, _}`, or anything beside an `{:ok, _}` clause, that raises nothing
+    and returns a literal, such as `nil`, `[]`, `:ok` or `{:ok, default}`, even when it logs the error first;
+  - a call that can return `{:error, _}`, its result thrown away: a statement in a block, or the value of a
+    function given to `Enum.each/2`. An explicit `_ = call` says it's ignored on purpose, and passes.
+
+  It passes:
+
+  - handlers of specific errors, such as `rescue Ecto.NoResultsError -> nil` or `{:error, :not_found} -> nil`;
+  - errors passed on: in the result, as `{:stop, reason}` is, or given to a call other than a log, as
+    `mark_failed(job, reason)` is; and results that say it failed, such as `:failed`;
+  - errors of code that touches nothing outside it, such as a parser's `{:error, _}` for bad input;
+  - predicates, functions named with `?`, answering `false`, as `match?({:ok, _}, call)` does;
+  - releases: errors from `close`, `stop`, `shutdown`, `cancel` and the like, which have nothing to recover;
+  - Mix tasks, which report to the person running them.
+  """
+  @spec no_swallowed_errors(ModuleSet.t(), keyword()) :: :ok
+  def no_swallowed_errors(%ModuleSet{} = subject, opts \\ []) do
+    {modules, code, effects} = Rules.analyze(subject, opts)
+
+    outside = %{
+      returning: Errors.returning(code),
+      dynamic: Errors.reaching_dynamic(code),
+      effects: effects
+    }
+
+    fails? = &fails_outside?(&1, &2, outside)
+
+    violations =
+      for module <- modules,
+          Mix.Task not in Code.behaviours(code, module),
+          {key, info} <- Code.functions_of(code, module),
+          not info.injected,
+          violation <- swallowed(code, key, info, fails?) ++ ignored(code, key, info, fails?),
+          do: violation
+
+    Rules.report(violations, "no_swallowed_errors")
   end
 
   @doc """
@@ -177,6 +240,59 @@ defmodule ArchTest.Guardrails do
         with {:ok, callbacks} <- Typespec.fetch_callbacks(behaviour),
              do: {:ok, MapSet.new(callbacks, &elem(&1, 0))}
     end
+  end
+
+  # A handler is judged when what it handles can fail in the outside world: a call in the try, or the case's subject
+  # or a with's right side that can return `{:error, _}`. A parse that returns `{:error, _}` for bad input, and a
+  # default for it, isn't a failure hidden; neither is a predicate's `false`.
+  defp swallowed(code, {_module, name, _arity} = key, info, fails?) do
+    for %{line: line, handler: handler, returns: returns, sources: sources} <- info.swallows,
+        Enum.any?(sources, &fails?.(&1, handler)),
+        not (returns == "false" and String.ends_with?(Atom.to_string(name), "?")) do
+      {message, fix} =
+        case handler do
+          :rescue ->
+            {"rescues every exception and returns #{returns}",
+             "rescue only the exceptions you expect and let the rest raise, or return {:error, reason}"}
+
+          :catch ->
+            {"catches everything thrown and returns #{returns}",
+             "catch only what you expect and let the rest through, or return {:error, reason}"}
+
+          :error ->
+            {"turns any {:error, _} into #{returns}",
+             "return the error, or handle only the reasons you expect"}
+        end
+
+      Rules.violation(code, "no_swallowed_errors", key,
+        line: line,
+        message: message <> ", so callers can't tell it failed",
+        fix: fix
+      )
+    end
+  end
+
+  defp ignored(code, {module, _, _} = key, info, fails?) do
+    for {target, line} <- info.discards, fails?.(target, :error) do
+      Rules.violation(code, "no_swallowed_errors", key,
+        line: line,
+        callee: target,
+        message: "ignores the {:error, _} that #{Rules.name(target, module)} can return",
+        fix: "match the result, and handle or return the error"
+      )
+    end
+  end
+
+  # Whether a call can fail in the outside world, other than in releasing something: it raises or, for an error
+  # handler, returns `{:error, _}`, and reaches I/O, or a module chosen at runtime, which may be anything.
+  defp fails_outside?({:dynamic, name, _arity}, handler, _outside),
+    do: handler != :error and name not in @releases
+
+  defp fails_outside?({_module, name, _arity} = target, handler, outside) do
+    name not in @releases and
+      (handler != :error or Errors.returns_error?(target, outside.returning)) and
+      (Rules.kind(target, @outside, outside.effects) != nil or
+         MapSet.member?(outside.dynamic, target))
   end
 
   defp tests(subject, opts) do

@@ -12,6 +12,7 @@ defmodule ArchTest.ExamplesTest do
     {ArchTest.Effects, :no_queries_in_loops},
     {ArchTest.Effects, :should_be_free_of_side_effects},
     {ArchTest.Effects, :no_work_in_init},
+    {ArchTest.Effects, :no_io_in_transactions},
     {ArchTest.Processes, :processes_have_one_interface},
     {ArchTest.Processes, :processes_hold_state},
     {ArchTest.Processes, :processes_are_supervised},
@@ -21,20 +22,33 @@ defmodule ArchTest.ExamplesTest do
     {ArchTest.TestCode, :async_tests_share_no_state},
     {ArchTest.Guardrails, :no_suppressions},
     {ArchTest.Guardrails, :no_stubs},
-    {ArchTest.Guardrails, :no_functions_only_tests_call}
+    {ArchTest.Guardrails, :no_functions_only_tests_call},
+    {ArchTest.Guardrails, :no_swallowed_errors}
   ]
 
   # `Shop.Repo`, an Ecto repo as `use Ecto.Repo` writes one, from a dependency's source.
   @repo {"deps/ecto/lib/shop/repo.ex",
          """
          defmodule Shop.Repo do
-           @compile {:no_warn_undefined, [Ecto.Repo.Queryable, Ecto.Repo.Schema]}
+           @compile {:no_warn_undefined, [Ecto.Repo.Queryable, Ecto.Repo.Schema, Ecto.Repo.Transaction]}
 
            def all(queryable, opts \\\\ []), do: Ecto.Repo.Queryable.all(__MODULE__, queryable, opts)
            def get!(queryable, id, opts \\\\ []), do: Ecto.Repo.Queryable.get!(__MODULE__, queryable, id, opts)
            def insert(struct, opts \\\\ []), do: Ecto.Repo.Schema.insert(__MODULE__, struct, opts)
+           def insert!(struct, opts \\\\ []), do: Ecto.Repo.Schema.insert!(__MODULE__, struct, opts)
+           def transaction(fun, opts \\\\ []), do: Ecto.Repo.Transaction.transaction(__MODULE__, fun, opts)
          end
          """}
+
+  # `Shop.Mailer`, a Swoosh mailer as `use Swoosh.Mailer` writes one.
+  @mailer {"deps/swoosh/lib/shop/mailer.ex",
+           """
+           defmodule Shop.Mailer do
+             @compile {:no_warn_undefined, [Swoosh.Mailer]}
+
+             def deliver(email, config \\\\ []), do: Swoosh.Mailer.deliver(email, config)
+           end
+           """}
 
   setup_all do
     %{examples: @guide |> File.read!() |> examples()}
@@ -73,6 +87,9 @@ defmodule ArchTest.ExamplesTest do
     end)
   end
 
+  defp modules(source),
+    do: for([_, module] <- Regex.scan(~r/^\s*defmodule ([\w.]+)/m, source), do: module)
+
   defp files(text) do
     ~r/^```elixir\n(.*?)^```$/ms
     |> Regex.scan(text, capture: :all_but_first)
@@ -94,7 +111,15 @@ defmodule ArchTest.ExamplesTest do
   defp check(module, rule, pattern, files) do
     directory = Path.join(@root, Atom.to_string(rule))
     File.rm_rf!(directory)
-    files = Map.put(files, elem(@repo, 0), elem(@repo, 1))
+    defined = files |> Map.values() |> Enum.flat_map(&modules/1)
+
+    stubs =
+      for {_path, source} = stub <- [@repo, @mailer],
+          modules(source) -- defined != [],
+          into: %{},
+          do: stub
+
+    files = Map.merge(stubs, files)
 
     for {path, source} <- files do
       File.mkdir_p!(Path.join(directory, Path.dirname(path)))
