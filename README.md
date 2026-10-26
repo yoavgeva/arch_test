@@ -25,6 +25,7 @@ Architecture rules as tests. Enforced from bytecode.
 | `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1` |
 | `ArchTest.Processes` | One interface per process, GenServers with a reason to exist, supervised processes |
 | `ArchTest.TestCode` | Tests that use their subject, mock only I/O, don't sleep, and keep async tests isolated |
+| `ArchTest.Guardrails` | No silenced warnings, no stubs, nothing public only for tests |
 | `ArchTest.Metrics` | Coupling, instability, distance from main sequence |
 | `ArchTest.Freeze` | Baseline violations for gradual adoption |
 | `ArchTest.Collector.calls/2` | Function-level call metadata with file/line |
@@ -457,6 +458,41 @@ end
 
 The subject selects test modules by name. See the
 [test code guide](guides/test-code.md).
+
+---
+
+## Guardrails
+
+`ArchTest.Guardrails` catches shortcuts that get a build green without doing
+the work, the kind AI agents take to finish a task:
+
+```elixir
+defmodule MyApp.GuardrailsTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.Guardrails
+
+  test "no suppressions" do
+    no_suppressions(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "no stubs" do
+    no_stubs(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "nothing is public only for tests" do
+    no_functions_only_tests_call(modules_matching("MyApp.**"), app: :my_app)
+  end
+end
+```
+
+- **`no_suppressions`** flags `# credo:disable-...`, `# sobelow_skip`,
+  `# coveralls-ignore-...`, `@dialyzer` nowarn options and `@compile` nowarn
+  options, in code and tests; `allow: [:dialyzer]` accepts a tool.
+- **`no_stubs`** flags functions that only `raise "not implemented"` or return
+  `{:error, :not_implemented}`.
+- **`no_functions_only_tests_call`** flags `@doc false` functions that only
+  tests call: made public to be tested. Behaviour callbacks are skipped.
 
 ---
 

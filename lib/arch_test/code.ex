@@ -30,9 +30,16 @@ defmodule ArchTest.Code do
           line: pos_integer() | nil,
           calls: [call()],
           state: :kept | :changed | nil,
-          injected: boolean()
+          injected: boolean(),
+          stub: String.t() | nil
         }
-  @type module_info :: %{file: String.t() | nil, behaviours: [module()]}
+  @type module_info :: %{
+          file: String.t() | nil,
+          behaviours: [module()],
+          impls: MapSet.t({atom(), arity()}),
+          hidden: MapSet.t({atom(), arity()}),
+          callbacks: MapSet.t({atom(), arity()})
+        }
   @type t :: %__MODULE__{
           modules: %{module() => module_info()},
           functions: %{key() => function_info()},
@@ -104,7 +111,12 @@ defmodule ArchTest.Code do
   defp add(code, module, read) do
     %{
       code
-      | modules: Map.put(code.modules, module, Map.take(read, [:file, :behaviours])),
+      | modules:
+          Map.put(
+            code.modules,
+            module,
+            Map.take(read, [:file, :behaviours, :impls, :hidden, :callbacks])
+          ),
         functions: Map.merge(code.functions, read.functions)
     }
   end
@@ -172,10 +184,37 @@ defmodule ArchTest.Code do
        %{
          file: info.file,
          behaviours: behaviours_in(binary),
+         impls: MapSet.new(Map.get(info, :impls, []), &elem(&1, 0)),
+         hidden: hidden_in(binary),
+         callbacks: callbacks_in(binary),
          functions: functions(module, info.definitions)
        }}
     else
       _ -> :error
+    end
+  end
+
+  # The functions marked `@doc false`, from the Docs chunk the compiler writes.
+  defp hidden_in(binary) do
+    case :beam_lib.chunks(binary, [~c"Docs"]) do
+      {:ok, {_module, [{~c"Docs", docs}]}} ->
+        {:docs_v1, _anno, _language, _format, _module_doc, _meta, entries} =
+          :erlang.binary_to_term(docs)
+
+        for {{:function, name, arity}, _anno, _signature, :hidden, _meta} <- entries,
+            into: MapSet.new(),
+            do: {name, arity}
+
+      _ ->
+        MapSet.new()
+    end
+  end
+
+  # The callbacks a behaviour module declares.
+  defp callbacks_in(binary) do
+    case Code.Typespec.fetch_callbacks(binary) do
+      {:ok, callbacks} -> MapSet.new(callbacks, &elem(&1, 0))
+      :error -> MapSet.new()
     end
   end
 
@@ -208,7 +247,8 @@ defmodule ArchTest.Code do
          line: meta[:line],
          calls: Walker.calls(clauses, module, locals),
          state: state,
-         injected: Keyword.has_key?(meta, :context)
+         injected: Keyword.has_key?(meta, :context),
+         stub: Walker.stub(clauses)
        }}
     end
   end

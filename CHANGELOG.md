@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     that touches nothing outside it.
   - `tests_dont_sleep/2` flags `Process.sleep/1` and `:timer.sleep/1`.
   - `async_tests_share_no_state/2` flags global state changed in async tests.
+- `ArchTest.Guardrails`, against shortcuts that get a build green:
+  - `no_suppressions/2` flags `# credo:disable-...`, `# sobelow_skip`,
+    `# coveralls-ignore-...`, `@dialyzer` and `@compile` nowarn options, with an
+    `:allow` option.
+  - `no_stubs/2` flags functions that only raise "not implemented" or return
+    `{:error, :not_implemented}`.
+  - `no_functions_only_tests_call/2` flags `@doc false` functions only tests
+    call.
 - The effects, processes and test code guides.
 
 ## [0.3.1] - 2026-05-21

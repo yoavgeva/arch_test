@@ -276,6 +276,22 @@ tests_dont_sleep(modules_matching("MyApp.**"), app: :my_app)
 async_tests_share_no_state(modules_matching("MyApp.**"), app: :my_app)
 ```
 
+## Guardrails
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.Guardrails
+
+# no credo:disable, sobelow_skip, coveralls-ignore, @dialyzer nowarn...
+no_suppressions(modules_matching("MyApp.**"), app: :my_app, allow: [:dialyzer])
+
+# no raise "not implemented"
+no_stubs(modules_matching("MyApp.**"), app: :my_app)
+
+# no @doc false function only tests call
+no_functions_only_tests_call(modules_matching("MyApp.**"), app: :my_app)
+```
+
 ## Coupling Metrics
 
 ```elixir

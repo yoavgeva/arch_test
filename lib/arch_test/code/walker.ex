@@ -21,6 +21,40 @@ defmodule ArchTest.Code.Walker do
     |> Enum.reverse()
   end
 
+  # Words that say a function isn't written yet.
+  @unfinished ~r/not (yet )?implemented|unimplemented|implement me|\bTODO\b|\bFIXME\b/i
+
+  @doc false
+  # How a function stands in for code nobody wrote yet, when every clause does: it only raises an error saying so,
+  # as `raise "not implemented"` does, or only returns `:not_implemented` or `{:error, :not_implemented}`.
+  @spec stub([tuple()]) :: String.t() | nil
+  def stub(clauses) do
+    reasons = Enum.map(clauses, fn {_meta, _args, _guards, body} -> stub_body(body) end)
+    if reasons != [] and Enum.all?(reasons), do: hd(reasons)
+  end
+
+  defp stub_body({:__block__, _, [body]}), do: stub_body(body)
+
+  defp stub_body({{:., _, [:erlang, :error]}, _, [exception | _]}) do
+    message =
+      exception
+      |> Macro.prewalk([], &collect_strings/2)
+      |> elem(1)
+      |> Enum.find(&(&1 =~ @unfinished))
+
+    if message, do: ~s(raises "#{message}")
+  end
+
+  defp stub_body(body) when body in [:not_implemented, :todo], do: "returns #{inspect(body)}"
+
+  defp stub_body({:error, reason}) when reason in [:not_implemented, :todo],
+    do: "returns {:error, #{inspect(reason)}}"
+
+  defp stub_body(_body), do: nil
+
+  defp collect_strings(string, acc) when is_binary(string), do: {string, [string | acc]}
+  defp collect_strings(node, acc), do: {node, acc}
+
   @doc false
   # Whether a GenServer callback returns the state it was given: `:kept` when every reply tuple each clause
   # returns, such as `{:reply, value, state}` or `{:noreply, state}`, names the state parameter itself, and
