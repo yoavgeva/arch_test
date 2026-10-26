@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `ArchTest.Effects`: rules about what code does to the outside world, followed
+  through every call rather than only the calls written in a function.
+  - `no_queries_in_loops/2` flags N+1 queries, including those made through
+    context functions, captures, `for`, `reduce` and `Stream`.
+  - `should_be_free_of_side_effects/2` keeps a functional core pure, reporting
+    each call that leaves it, with an `:allow` option.
+  - `no_work_in_init/2` flags GenServers that do I/O in `init/1` instead of
+    `handle_continue/2`.
+- `%ArchTest.Violation{}` gains `:rule` and `:fix`. Violations that set them
+  print their file, line, function and fix. They aren't part of freeze keys, so
+  existing baselines stay valid.
+- The effects guide.
+
 ## [0.3.1] - 2026-05-21
 
 ### Added

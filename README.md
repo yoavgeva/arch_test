@@ -22,6 +22,7 @@ Architecture rules as tests. Enforced from bytecode.
 | `define_onion` + `enforce_onion_rules` | Onion / hexagonal architecture |
 | `define_slices` + `enforce_isolation` | Modulith bounded-context isolation |
 | `ArchTest.Conventions` | Ban `IO.puts`, `dbg`, bare `raise`, and more |
+| `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1` |
 | `ArchTest.Metrics` | Coupling, instability, distance from main sequence |
 | `ArchTest.Freeze` | Baseline violations for gradual adoption |
 | `ArchTest.Collector.calls/2` | Function-level call metadata with file/line |
@@ -304,6 +305,67 @@ end
 
 `ArchTest.Conventions` helpers are plain functions, so pass `app: :my_app` to
 keep convention checks scoped like the rest of your architecture tests.
+
+---
+
+## Effects: N+1 queries, functional cores, GenServer init
+
+`ArchTest.Effects` checks what code does to the outside world — the database,
+HTTP, files, the console, processes, the clock, randomness, the environment —
+through every function it calls, not only the calls written in it.
+
+```elixir
+defmodule MyApp.EffectsTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.Effects
+
+  test "no N+1 queries" do
+    no_queries_in_loops(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "the pricing core is pure" do
+    should_be_free_of_side_effects(modules_matching("MyApp.Pricing.**"), app: :my_app)
+  end
+
+  test "GenServers start fast" do
+    no_work_in_init(modules_matching("MyApp.**"), app: :my_app)
+  end
+end
+```
+
+**`no_queries_in_loops`** flags a query made once per item of a loop, even
+when the query is a few calls away. Neither function below names `Repo`:
+
+```elixir
+def with_users(orders) do
+  Enum.map(orders, fn order -> {order, Accounts.get_user!(order.user_id)} end)
+end
+```
+
+```
+  MyApp.Orders
+    ✗ lib/my_app/orders.ex:5 MyApp.Orders.with_users/1
+      queries the database once per item: Enum.map/2 calls MyApp.Accounts.get_user!/1, which reaches MyApp.Repo.get!/2
+      → fix: load what the loop needs with one query before it, such as Repo.all with `where: x.id in ^ids`, or Repo.preload
+```
+
+Loops are functions given to `Enum`, `Stream` and `Task.async_stream`,
+captures such as `Enum.map(ids, &Accounts.get_user!/1)`, and `for`. A query
+reads the database or makes an HTTP request; writes, and functions named for a
+change such as `create_user/1`, are left alone.
+
+**`should_be_free_of_side_effects`** keeps a functional core pure. It reports
+each call that leaves the core, where it's made — `reads the clock through
+Date.utc_today/0` — and takes `allow: [:clock]` for effects you accept.
+
+**`no_work_in_init`** flags a GenServer whose `init/1` does I/O, directly or
+through what it calls, since its supervisor waits for it. Return
+`{:ok, state, {:continue, :load}}` and do the work in `handle_continue/2`.
+
+The rules read the code from debug info, after macro expansion, so aliases,
+imports and `use` are resolved. See the [effects guide](guides/effects.md) for
+what counts as an effect and as a loop.
 
 ---
 

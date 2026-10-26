@@ -225,6 +225,22 @@ no_plug_in(modules_matching("MyApp.Domain.**"), app: :my_app)
 all_public_functions_documented(modules_matching("MyApp.**.*Repo"), app: :my_app)
 ```
 
+## Effects
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.Effects
+
+# N+1: a query once per item, through any call
+no_queries_in_loops(modules_matching("MyApp.**"), app: :my_app)
+
+# a pure functional core, optionally allowing some effects
+should_be_free_of_side_effects(modules_matching("MyApp.Pricing.**"), app: :my_app, allow: [:clock])
+
+# no I/O in GenServer init/1: use handle_continue/2
+no_work_in_init(modules_matching("MyApp.**"), app: :my_app)
+```
+
 ## Coupling Metrics
 
 ```elixir

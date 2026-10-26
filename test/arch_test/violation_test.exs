@@ -126,6 +126,36 @@ defmodule ArchTest.ViolationTest do
     end
   end
 
+  describe "a rule's violation" do
+    setup do
+      %{
+        violation: %Violation{
+          type: :custom,
+          rule: "no_queries_in_loops",
+          module: MyApp.Orders,
+          caller: MyApp.Orders,
+          caller_function: {:with_users, 1},
+          file: "lib/my_app/orders.ex",
+          line: 5,
+          message:
+            "queries the database once per item: Enum.map/2 calls MyApp.Accounts.get_user!/1",
+          fix: "load what the loop needs with one query before it"
+        }
+      }
+    end
+
+    test "shows where it is, the function, and the fix", %{violation: violation} do
+      assert Violation.format(violation) ==
+               "    ✗ lib/my_app/orders.ex:5 MyApp.Orders.with_users/1\n" <>
+                 "      queries the database once per item: Enum.map/2 calls MyApp.Accounts.get_user!/1\n" <>
+                 "      → fix: load what the loop needs with one query before it"
+    end
+
+    test "keeps the same freeze key whatever its rule and fix say", %{violation: violation} do
+      assert Violation.key(violation) == Violation.key(%{violation | rule: nil, fix: "reworded"})
+    end
+  end
+
   describe "format_all/1" do
     test "returns '(no violations)' for empty list" do
       assert Violation.format_all([]) == "(no violations)"

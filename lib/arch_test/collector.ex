@@ -153,6 +153,11 @@ defmodule ArchTest.Collector do
     end
   end
 
+  @doc false
+  # The ebin directories a scope covers: `:paths`, `:apps`, or the app.
+  @spec beam_paths(atom() | :all, keyword()) :: [String.t()]
+  def beam_paths(app, opts), do: beam_paths_for_scope(app, opts)
+
   @doc """
   Returns all modules known in the graph.
   """
