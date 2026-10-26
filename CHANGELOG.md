@@ -5,6 +5,116 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-26
+
+### Added
+
+- `ArchTest.Effects`: rules about what code does to the outside world, followed
+  through every call rather than only the calls written in a function.
+  - `no_queries_in_loops/2` flags N+1 queries, including those made through
+    context functions, captures, `for`, `reduce` and `Stream`.
+  - `should_be_free_of_side_effects/2` keeps a functional core pure, reporting
+    each call that leaves it, with an `:allow` option.
+  - `no_work_in_init/2` flags GenServers that do I/O in `init/1` instead of
+    `handle_continue/2`.
+- `%ArchTest.Violation{}` gains `:rule` and `:fix`. Violations that set them
+  print their file, line, function and fix. They aren't part of freeze keys, so
+  existing baselines stay valid.
+- `ArchTest.Processes`, from Elixir's process anti-patterns:
+  - `processes_have_one_interface/2` flags messages sent to a named process
+    from outside its module ("scattered process interfaces").
+  - `processes_hold_state/2` flags GenServers whose state never changes and
+    whose callbacks touch nothing outside them ("code organization by
+    process"), passing ones that own a resource they start or clean up.
+  - `processes_are_supervised/2` flags `spawn/1`, `Task.start/1`,
+    `GenServer.start/2` and `Agent.start/1` ("unsupervised processes").
+- `ArchTest.TestCode`, which reads `*_test.exs` files from source and checks
+  them against the compiled code:
+  - `tests_use_their_subject/2` flags a test that never uses the module it's
+    named after, or only mocks it.
+  - `tests_dont_mock_pure_modules/2` flags Mimic, Mock and Mox mocks of code
+    that touches nothing outside it.
+  - `tests_dont_sleep/2` flags `Process.sleep/1` and `:timer.sleep/1`.
+  - `async_tests_share_no_state/2` flags global state changed in async tests.
+- `ArchTest.Guardrails`, against shortcuts that get a build green:
+  - `no_suppressions/2` flags `# credo:disable-...`, `# sobelow_skip`,
+    `# coveralls-ignore-...`, `@dialyzer` and `@compile` nowarn options, with an
+    `:allow` option.
+  - `no_stubs/2` flags functions that only raise "not implemented" or return
+    `{:error, :not_implemented}`.
+  - `no_functions_only_tests_call/2` flags `@doc false` functions only tests
+    call.
+- `ArchTest.Effects.no_io_in_transactions/2` flags HTTP requests, network
+  calls, email and published messages inside `Repo.transaction/1`,
+  `Repo.transact/1` or `Ecto.Multi.run/3`, directly or through the functions
+  they call: a rollback can't take them back, and the transaction holds its
+  connection while they wait.
+- `ArchTest.Guardrails.no_swallowed_errors/2` flags catch-all handlers that
+  turn an error from the outside world into success, such as `rescue _ -> nil`
+  or `{:error, _} -> nil`, and `{:error, _}` results thrown away. Errors passed
+  on or recorded, parsers' errors, predicates, cleanup and Mix tasks pass.
+- Two effect kinds, `:mail` (Swoosh, Bamboo, `:gen_smtp_client`) and `:publish`
+  (`Phoenix.PubSub` and channel broadcasts, AMQP, Kafka), which
+  `should_be_free_of_side_effects/2` accepts in `allow:`.
+- `ArchTest.Effects.writes_are_authorized/2` flags controller actions,
+  LiveView events and channel messages that write to the database with
+  nothing tying the change to the user asking: the call that writes isn't
+  given the current user or scope, and no policy, plug or router pipeline
+  checks permissions. `policy:` names a project's policy modules and plugs.
+- `ArchTest.Processes.no_unbounded_waits/2` flags `:infinity` timeouts,
+  `receive` without `after`, and `:gen_tcp`, `:ssl` and `:httpc` calls that
+  wait forever by default. A process's own receive loop, and a receive that
+  takes the `:DOWN` of the process it waits on, pass.
+- `ArchTest.API`, rules about what public functions take and return:
+  - `no_flag_arguments/2` flags boolean parameters a function branches on.
+  - `typed_identifiers/2` flags functions taking two or more `*_id`
+    parameters, which a call can swap.
+  - `no_stringly_typed_choices/2` flags clause heads or a `case` matching
+    three or more strings, other than a parser's.
+  - `no_alternative_return_types/2` flags options that change the kind of
+    value a function returns, from Elixir's design anti-patterns.
+- `ArchTest.Recommended.check/2` runs the design rules worth holding any
+  project to, and reports what each finds in one assertion, with an `:except`
+  option. `mix arch_test.gen.design` writes a test running it, frozen. It leaves out
+  `should_be_free_of_side_effects/2`, `processes_hold_state/2`,
+  `writes_are_authorized/2` and `typed_identifiers/2`, which need a project's
+  own judgement.
+- The effects, processes, API and test code guides, and the design rule examples
+  guide, whose examples a test compiles and checks.
+- CI runs on Elixir 1.20 and OTP 29.
+
+### Checked on real code
+
+The design rules ran on three Elixir codebases: a Phoenix app, an SDK and a
+library. Every finding was read, and each false positive was fixed with a
+failing test first:
+
+- `Process.monitor/1` and `link/1` compile to `:erlang` calls, which now count
+  as process effects, so a GenServer that monitors its owner owns a resource.
+- Starting the `ssl` application isn't network I/O; connecting is.
+- A module's own `start`/`start_link` functions may start an unlinked process.
+- A test uses its subject when the code it calls, or a test helper it calls,
+  reaches it, including through a registry naming rule modules.
+- Raw SQL that writes, as a string, an interpolated one or one a helper builds,
+  is a write, not a query.
+- Sleeps in polling helpers, in fakes without tests, and
+  `Process.sleep(:infinity)` aren't flagged.
+- A swallowed error counts only when it comes from the outside world, or code
+  calling through a module chosen at runtime; parsers' errors, predicates,
+  releases and Mix tasks pass.
+- A write is authorized when the user asking reaches the call that writes,
+  through assigns, `current_*` helpers, `case` bindings or `conn`/`socket`
+  handed on, or when a router pipeline to the action runs a policy.
+- A process's receive loop through its module's functions, and a receive that
+  takes the `:DOWN` of the process it waits on, aren't unbounded waits.
+- Tests reach their subject through helpers imported with `only:`.
+
+### Fixed
+
+- Elixir 1.20's compiler warnings: an unused `require Logger` in
+  `ArchTest.Collector`, and an always-true `is_list/1` check in
+  `ArchTest.Metrics`.
+
 ## [0.3.1] - 2026-05-21
 
 ### Added

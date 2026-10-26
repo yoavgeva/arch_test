@@ -225,6 +225,117 @@ no_plug_in(modules_matching("MyApp.Domain.**"), app: :my_app)
 all_public_functions_documented(modules_matching("MyApp.**.*Repo"), app: :my_app)
 ```
 
+## Effects
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.Effects
+
+# N+1: a query once per item, through any call
+no_queries_in_loops(modules_matching("MyApp.**"), app: :my_app)
+
+# a pure functional core, optionally allowing some effects
+should_be_free_of_side_effects(modules_matching("MyApp.Pricing.**"), app: :my_app, allow: [:clock])
+
+# no I/O in GenServer init/1: use handle_continue/2
+no_work_in_init(modules_matching("MyApp.**"), app: :my_app)
+
+# no HTTP, email or PubSub inside Repo.transaction/1 or Ecto.Multi.run/3
+no_io_in_transactions(modules_matching("MyApp.**"), app: :my_app)
+
+# endpoints that write pass the current user or check a policy
+writes_are_authorized(
+  modules_matching("MyAppWeb.**") |> excluding("MyAppWeb.UserSessionController"),
+  app: :my_app,
+  policy: [MyApp.Policy, MyAppWeb.Plugs.RequireAdmin]
+)
+```
+
+## Processes
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.Processes
+
+# only MyApp.Cache sends MyApp.Cache messages
+processes_have_one_interface(modules_matching("MyApp.**"), app: :my_app)
+
+# GenServers change state, do I/O, or own a resource
+processes_hold_state(modules_matching("MyApp.**"), app: :my_app)
+
+# no spawn/1, Task.start/1, GenServer.start/2 outside a supervisor
+processes_are_supervised(modules_matching("MyApp.**"), app: :my_app)
+
+# no :infinity timeouts, receive without after, :gen_tcp.recv/2...
+no_unbounded_waits(modules_matching("MyApp.**"), app: :my_app)
+```
+
+## API
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.API
+
+# no render(text, true): split the function, or take an atom
+no_flag_arguments(modules_matching("MyApp.**"), app: :my_app)
+
+# no case on "standard" | "express" | "overnight": parse to atoms once
+no_stringly_typed_choices(modules_matching("MyApp.**"), app: :my_app)
+
+# no option that turns a tuple into a bare value
+no_alternative_return_types(modules_matching("MyApp.**"), app: :my_app)
+
+# no transfer(from_id, to_id, amount) where a swap runs
+typed_identifiers(modules_matching("MyApp.Billing.**"), app: :my_app)
+```
+
+## Test Code
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.TestCode
+
+# MyApp.AccountsTest uses MyApp.Accounts, not only mocks of it
+tests_use_their_subject(modules_matching("MyApp.**"), app: :my_app)
+
+# mocks replace only code that does I/O
+tests_dont_mock_pure_modules(modules_matching("MyApp.**"), app: :my_app)
+
+# no Process.sleep/1 in tests
+tests_dont_sleep(modules_matching("MyApp.**"), app: :my_app)
+
+# no Application.put_env/3 and the like in async tests
+async_tests_share_no_state(modules_matching("MyApp.**"), app: :my_app)
+```
+
+## Guardrails
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.Guardrails
+
+# no credo:disable, sobelow_skip, coveralls-ignore, @dialyzer nowarn...
+no_suppressions(modules_matching("MyApp.**"), app: :my_app, allow: [:dialyzer])
+
+# no raise "not implemented"
+no_stubs(modules_matching("MyApp.**"), app: :my_app)
+
+# no @doc false function only tests call
+no_functions_only_tests_call(modules_matching("MyApp.**"), app: :my_app)
+
+# no rescue _ -> nil or {:error, _} -> nil around I/O
+no_swallowed_errors(modules_matching("MyApp.**"), app: :my_app)
+```
+
+## Recommended Design Rules
+
+```elixir
+# every recommended design rule, one report, frozen for gradual adoption
+ArchTest.Freeze.freeze("recommended_design_rules", fn ->
+  ArchTest.Recommended.check(modules_matching("MyApp.**"), app: :my_app, except: [:tests_dont_sleep])
+end)
+```
+
 ## Coupling Metrics
 
 ```elixir

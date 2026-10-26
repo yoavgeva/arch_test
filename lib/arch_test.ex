@@ -36,6 +36,11 @@ defmodule ArchTest do
   - `ArchTest.Freeze` — violation baseline / freezing
   - `ArchTest.Metrics` — coupling/instability metrics
   - `ArchTest.Conventions` — pre-built Elixir convention rules
+  - `ArchTest.Effects` — N+1 queries, pure functional cores and GenServer init, through every call
+  - `ArchTest.Processes` — one interface per process, GenServers with a reason to exist, supervision
+  - `ArchTest.TestCode` — tests that use their subject, mock only I/O, don't sleep, and stay isolated
+  - `ArchTest.Guardrails` — no silenced warnings, no stubs, nothing public only for tests
+  - `ArchTest.Recommended` — the design rules worth holding any project to, as one test
   - `ArchTest.Collector` — BEAM dependency graph builder
   - `ArchTest.Pattern` — glob pattern matching
   """

@@ -17,7 +17,9 @@ defmodule ArchTest.Violation do
     :line,
     :caller_function,
     :callee_function,
-    :message
+    :message,
+    :rule,
+    :fix
   ]
 
   @type violation_type ::
@@ -39,7 +41,9 @@ defmodule ArchTest.Violation do
           line: pos_integer() | nil,
           caller_function: {atom(), non_neg_integer()} | nil,
           callee_function: {atom(), non_neg_integer()} | nil,
-          message: String.t()
+          message: String.t(),
+          rule: String.t() | nil,
+          fix: String.t() | nil
         }
 
   @doc """
@@ -74,6 +78,8 @@ defmodule ArchTest.Violation do
 
   The key is intentionally line-oriented and text-friendly, but it is derived
   from the violation struct rather than parsed from rendered assertion output.
+  A violation's `rule` and `fix` aren't part of it, so rewording a fix keeps
+  baselines valid.
   """
   @spec key(t()) :: String.t()
   def key(%__MODULE__{} = v) do
@@ -193,6 +199,19 @@ defmodule ArchTest.Violation do
     header = "  #{inspect(mod)}"
     items = Enum.map_join(violations, "\n", &format_single/1)
     "#{header}\n#{items}"
+  end
+
+  defp format_single(%__MODULE__{rule: rule} = v) when is_binary(rule) do
+    function =
+      case v.caller_function do
+        {name, arity} -> "#{inspect(v.module)}.#{name}/#{arity}"
+        nil -> inspect(v.module)
+      end
+
+    fix = if v.fix, do: "\n      → fix: #{v.fix}", else: ""
+
+    location = format_location(v.file, v.line) || "(no location)"
+    "    ✗ #{location} #{function} [#{rule}]\n      #{v.message}#{fix}"
   end
 
   defp format_single(%__MODULE__{type: :cycle, path: path, message: msg}) when not is_nil(path) do

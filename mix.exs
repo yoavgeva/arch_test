@@ -1,7 +1,7 @@
 defmodule ArchTest.MixProject do
   use Mix.Project
 
-  @version "0.3.1"
+  @version "0.4.0"
   @source_url "https://github.com/yoavgeva/arch_test"
 
   def project do
@@ -48,7 +48,8 @@ defmodule ArchTest.MixProject do
   defp description do
     "ArchUnit-inspired architecture testing library for Elixir. " <>
       "Write ExUnit tests that enforce dependency rules, layered architecture, " <>
-      "modulith bounded contexts, and naming conventions."
+      "modulith bounded contexts, naming conventions, and design rules: " <>
+      "N+1 queries, processes, tests, and AI shortcuts."
   end
 
   defp package do
@@ -78,6 +79,11 @@ defmodule ArchTest.MixProject do
         "guides/layered-architecture.md",
         "guides/modulith-rules.md",
         "guides/freezing.md",
+        "guides/effects.md",
+        "guides/processes.md",
+        "guides/api.md",
+        "guides/test-code.md",
+        "guides/design-rule-examples.md",
         {"test/support/fixture_app/README.md",
          [filename: "fixture-app-examples", title: "FixtureApp Architecture Examples"]},
         "cheatsheets/arch_test.cheatmd",
@@ -91,7 +97,12 @@ defmodule ArchTest.MixProject do
           "guides/advanced-rules.md",
           "guides/layered-architecture.md",
           "guides/modulith-rules.md",
-          "guides/freezing.md"
+          "guides/freezing.md",
+          "guides/effects.md",
+          "guides/processes.md",
+          "guides/api.md",
+          "guides/test-code.md",
+          "guides/design-rule-examples.md"
         ],
         Examples: [
           "test/support/fixture_app/README.md"
@@ -105,6 +116,14 @@ defmodule ArchTest.MixProject do
         "Architecture Patterns": [ArchTest.Layers, ArchTest.Modulith],
         "Data Collection": [ArchTest.Collector, ArchTest.Call, ArchTest.Pattern],
         "Advanced Features": [ArchTest.Freeze, ArchTest.Metrics, ArchTest.Conventions],
+        "Design Rules": [
+          ArchTest.Effects,
+          ArchTest.Processes,
+          ArchTest.API,
+          ArchTest.TestCode,
+          ArchTest.Guardrails,
+          ArchTest.Recommended
+        ],
         "Diagram Conformance": [ArchTest.PlantUML],
         Internals: [ArchTest.Rule, ArchTest.Violation]
       ]

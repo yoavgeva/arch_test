@@ -12,7 +12,7 @@ Everything works from compiled BEAM bytecode via OTP's `:xref`. No source parsin
 # mix.exs
 defp deps do
   [
-    {:arch_test, "~> 0.3", only: :test, runtime: false}
+    {:arch_test, "~> 0.4", only: :test, runtime: false}
   ]
 end
 ```

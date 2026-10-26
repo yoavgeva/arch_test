@@ -4,7 +4,7 @@
 [![Hex.pm](https://img.shields.io/hexpm/v/arch_test.svg)](https://hex.pm/packages/arch_test)
 [![Docs](https://img.shields.io/badge/docs-hexdocs-blue.svg)](https://hexdocs.pm/arch_test)
 
-Architecture rules as tests. Enforced from bytecode.
+Architecture and design rules as tests. Enforced from bytecode.
 
 | Assertion | What it checks |
 |-----------|----------------|
@@ -22,6 +22,12 @@ Architecture rules as tests. Enforced from bytecode.
 | `define_onion` + `enforce_onion_rules` | Onion / hexagonal architecture |
 | `define_slices` + `enforce_isolation` | Modulith bounded-context isolation |
 | `ArchTest.Conventions` | Ban `IO.puts`, `dbg`, bare `raise`, and more |
+| `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1`, I/O in transactions, authorized writes |
+| `ArchTest.Processes` | One interface per process, GenServers with a reason to exist, supervised processes, waits with limits |
+| `ArchTest.API` | No flag arguments, no swappable ids, choices as atoms, one return type per function |
+| `ArchTest.TestCode` | Tests that use their subject, mock only I/O, don't sleep, and keep async tests isolated |
+| `ArchTest.Guardrails` | No silenced warnings, no stubs, nothing public only for tests, no swallowed errors |
+| `ArchTest.Recommended` | The design rules worth holding any project to, as one test |
 | `ArchTest.Metrics` | Coupling, instability, distance from main sequence |
 | `ArchTest.Freeze` | Baseline violations for gradual adoption |
 | `ArchTest.Collector.calls/2` | Function-level call metadata with file/line |
@@ -57,7 +63,7 @@ For most teams, **ArchTest alone is enough**. You get bounded-context isolation,
 # mix.exs
 def deps do
   [
-    {:arch_test, "~> 0.3", only: :test, runtime: false}
+    {:arch_test, "~> 0.4", only: :test, runtime: false}
   ]
 end
 ```
@@ -80,6 +86,7 @@ If you use [Igniter](https://hex.pm/packages/igniter), ArchTest provides generat
 | `mix arch_test.gen.modulith` | [Bounded-context slice isolation](guides/modulith-rules.md) ([Modular Monolith Primer](https://www.kamilgrzybek.com/blog/posts/modular-monolith-primer)) |
 | `mix arch_test.gen.naming` | Naming rules — no Managers, schema namespace placement |
 | `mix arch_test.gen.conventions` | Code hygiene — no `IO.puts`, `dbg`, bare `raise` |
+| `mix arch_test.gen.design` | [Recommended design rules](#recommended-design-rules), frozen so only new violations fail |
 | `mix arch_test.gen.freeze` | [Freeze baseline for gradual adoption](guides/freezing.md) |
 
 Add Igniter as a dev dependency to use these:
@@ -304,6 +311,298 @@ end
 
 `ArchTest.Conventions` helpers are plain functions, so pass `app: :my_app` to
 keep convention checks scoped like the rest of your architecture tests.
+
+---
+
+## Effects: N+1 queries, functional cores, GenServer init
+
+`ArchTest.Effects` checks what code does to the outside world — the database,
+HTTP, files, the console, processes, the clock, randomness, the environment —
+through every function it calls, not only the calls written in it.
+
+```elixir
+defmodule MyApp.EffectsTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.Effects
+
+  test "no N+1 queries" do
+    no_queries_in_loops(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "the pricing core is pure" do
+    should_be_free_of_side_effects(modules_matching("MyApp.Pricing.**"), app: :my_app)
+  end
+
+  test "GenServers start fast" do
+    no_work_in_init(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "transactions stay in the database" do
+    no_io_in_transactions(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "writes are authorized" do
+    writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app, policy: MyApp.Policy)
+  end
+end
+```
+
+**`no_queries_in_loops`** flags a query made once per item of a loop, even
+when the query is a few calls away. Neither function below names `Repo`:
+
+```elixir
+def with_users(orders) do
+  Enum.map(orders, fn order -> {order, Accounts.get_user!(order.user_id)} end)
+end
+```
+
+```
+  MyApp.Orders
+    ✗ lib/my_app/orders.ex:5 MyApp.Orders.with_users/1
+      queries the database once per item: Enum.map/2 calls MyApp.Accounts.get_user!/1, which reaches MyApp.Repo.get!/2
+      → fix: load what the loop needs with one query before it, such as Repo.all with `where: x.id in ^ids`, or Repo.preload
+```
+
+Loops are functions given to `Enum`, `Stream` and `Task.async_stream`,
+captures such as `Enum.map(ids, &Accounts.get_user!/1)`, and `for`. A query
+reads the database or makes an HTTP request; writes, and functions named for a
+change such as `create_user/1`, are left alone.
+
+**`should_be_free_of_side_effects`** keeps a functional core pure. It reports
+each call that leaves the core, where it's made — `reads the clock through
+Date.utc_today/0` — and takes `allow: [:clock]` for effects you accept.
+
+**`no_work_in_init`** flags a GenServer whose `init/1` does I/O, directly or
+through what it calls, since its supervisor waits for it. Return
+`{:ok, state, {:continue, :load}}` and do the work in `handle_continue/2`.
+
+**`no_io_in_transactions`** flags HTTP requests, email and published messages
+inside `Repo.transaction/1` or `Ecto.Multi.run/3`, directly or through what
+they call. A rollback can't take them back, and the transaction holds its
+connection while they wait. Do them after the commit, or through an outbox or
+Oban job.
+
+**`writes_are_authorized`** flags controller actions, LiveView events and
+channel messages that write to the database with nothing tying the change to
+the user asking: the call that writes isn't given the current user or scope,
+and no policy, plug or router pipeline checks permissions. Leave public
+endpoints such as sign-up and log-in out of the subject.
+
+The rules read the code from debug info, after macro expansion, so aliases,
+imports and `use` are resolved. See the [effects guide](guides/effects.md) for
+what counts as an effect and as a loop.
+
+---
+
+## Processes
+
+`ArchTest.Processes` checks three of Elixir's
+[process anti-patterns](https://hexdocs.pm/elixir/process-anti-patterns.html):
+
+```elixir
+defmodule MyApp.ProcessesTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.Processes
+
+  test "each process has one interface" do
+    processes_have_one_interface(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "GenServers hold state or do I/O" do
+    processes_hold_state(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "processes are supervised" do
+    processes_are_supervised(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "waits have limits" do
+    no_unbounded_waits(modules_matching("MyApp.**"), app: :my_app)
+  end
+end
+```
+
+- **`processes_have_one_interface`** flags `GenServer.call(MyApp.Cache, ...)`,
+  `GenServer.cast/2`, `Agent` calls and `send/2` to a process named after a
+  module, made outside that module. Give the module a function that sends the
+  message, and call that.
+- **`processes_hold_state`** flags a GenServer whose replies always keep the
+  state they were given and whose callbacks touch nothing outside it: a module
+  of plain functions would do, without making callers queue. One that changes
+  state, does I/O, or owns a resource it starts in `init/1` or cleans up in
+  `terminate/2` passes.
+- **`processes_are_supervised`** flags `spawn/1`, `Task.start/1`,
+  `GenServer.start/2` and `Agent.start/1`: nothing notices when such a process
+  crashes, and shutdown doesn't stop it. Use `Task.Supervisor.start_child/2` or
+  the supervision tree.
+- **`no_unbounded_waits`** flags `GenServer.call/3`, `Task.await/2` and the
+  like given `:infinity`, options such as `timeout: :infinity`, `receive`
+  without `after`, and `:gen_tcp`, `:ssl` and `:httpc` calls that wait forever
+  by default. A process's own receive loop, and a receive that also takes the
+  `:DOWN` of the process it waits on, pass.
+
+See the [processes guide](guides/processes.md).
+
+---
+
+
+## API
+
+`ArchTest.API` checks what public functions take and return:
+
+```elixir
+defmodule MyApp.APITest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.API
+
+  test "no flag arguments" do
+    no_flag_arguments(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "choices are atoms" do
+    no_stringly_typed_choices(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "options don't change what a function returns" do
+    no_alternative_return_types(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "billing ids can't be swapped" do
+    typed_identifiers(modules_matching("MyApp.Billing.**"), app: :my_app)
+  end
+end
+```
+
+- **`no_flag_arguments`** flags boolean parameters a public function branches
+  on, as in `render(text, true)`: split the function, or take an atom.
+- **`no_stringly_typed_choices`** flags clause heads or a `case` matching three
+  or more strings. Parse the string into an atom where it enters, once.
+- **`no_alternative_return_types`** flags options that change the kind of
+  value returned, such as `parse(text, discard_rest: true)` returning an
+  integer instead of a tuple.
+- **`typed_identifiers`** flags public functions taking two or more `*_id`
+  parameters, which a call can swap. Point it at code where a mix-up costs
+  most.
+
+See the [API guide](guides/api.md).
+
+---
+
+## Test code
+
+`ArchTest.TestCode` checks your tests against your code. ExUnit compiles test
+files in memory, so these rules read the `*_test.exs` files from source.
+
+```elixir
+defmodule MyApp.TestRulesTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.TestCode
+
+  test "tests use their subject" do
+    tests_use_their_subject(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "tests mock only I/O" do
+    tests_dont_mock_pure_modules(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "tests don't sleep" do
+    tests_dont_sleep(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "async tests share no state" do
+    async_tests_share_no_state(modules_matching("MyApp.**"), app: :my_app)
+  end
+end
+```
+
+- **`tests_use_their_subject`** flags `MyApp.AccountsTest` when it never uses
+  `MyApp.Accounts`, or only mocks it. Requests through `Phoenix.ConnTest`,
+  `LiveViewTest` and `ChannelTest` count for controllers, live views and
+  channels.
+- **`tests_dont_mock_pure_modules`** flags Mimic, Mock and Mox mocks of code
+  that touches nothing outside it: a test of the mock checks nothing.
+- **`tests_dont_sleep`** flags `Process.sleep/1` and `:timer.sleep/1`: wait
+  with `assert_receive` or a monitor instead.
+- **`async_tests_share_no_state`** flags `Application.put_env/3`,
+  `System.put_env/2`, `:persistent_term.put/2` and `Logger.configure/1` in
+  `async: true` tests, which leak into the tests running beside them.
+
+The subject selects test modules by name. See the
+[test code guide](guides/test-code.md).
+
+---
+
+## Guardrails
+
+`ArchTest.Guardrails` catches shortcuts that get a build green without doing
+the work, the kind AI agents take to finish a task:
+
+```elixir
+defmodule MyApp.GuardrailsTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.Guardrails
+
+  test "no suppressions" do
+    no_suppressions(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "no stubs" do
+    no_stubs(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "nothing is public only for tests" do
+    no_functions_only_tests_call(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "errors reach their callers" do
+    no_swallowed_errors(modules_matching("MyApp.**"), app: :my_app)
+  end
+end
+```
+
+- **`no_suppressions`** flags `# credo:disable-...`, `# sobelow_skip`,
+  `# coveralls-ignore-...`, `@dialyzer` nowarn options and `@compile` nowarn
+  options, in code and tests; `allow: [:dialyzer]` accepts a tool.
+- **`no_stubs`** flags functions that only `raise "not implemented"` or return
+  `{:error, :not_implemented}`.
+- **`no_functions_only_tests_call`** flags `@doc false` functions that only
+  tests call: made public to be tested. Behaviour callbacks are skipped.
+- **`no_swallowed_errors`** flags `rescue _ -> nil`, `{:error, _} -> nil` and
+  the like, and `{:error, _}` results thrown away, when the error comes from the
+  database, HTTP, files or another outside call. Handlers of specific errors,
+  errors passed on or recorded, parsers, predicates and cleanup pass.
+
+---
+
+## Recommended design rules
+
+`ArchTest.Recommended` runs the design rules worth holding any project to —
+N+1 queries, GenServer init, I/O in transactions, process interfaces and
+supervision, waits with limits, flag arguments, string choices, alternative
+return types, the test rules and the guardrails — and reports what each finds in one test:
+
+```elixir
+test "recommended design rules" do
+  ArchTest.Freeze.freeze("recommended_design_rules", fn ->
+    ArchTest.Recommended.check(modules_matching("MyApp.**"), app: :my_app)
+  end)
+end
+```
+
+`mix arch_test.gen.design` writes this test. `except: [:tests_dont_sleep]`
+leaves a rule out. `should_be_free_of_side_effects` and `processes_hold_state`
+aren't in it: which modules form a functional core, and which processes may
+only organize code, is each project's call.
+
+[Design rule examples](guides/design-rule-examples.md) shows every design rule
+with code it flags and the fix; a test compiles each example and runs its rule
+on it.
 
 ---
 
