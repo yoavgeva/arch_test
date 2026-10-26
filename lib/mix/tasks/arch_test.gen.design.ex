@@ -27,7 +27,8 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
         use ExUnit.Case
         use ArchTest, app: #{inspect(app)}
 
-        # N+1 queries, GenServer init, process interfaces and supervision, tests, and guardrails against
+        # N+1 queries, GenServer init, process interfaces and supervision, mass assignment, lost updates, float money,
+        # tests, and guardrails against
         # silenced warnings, stubs and code made public for tests. See ArchTest.Recommended.
         test "recommended design rules" do
           ArchTest.Freeze.freeze("recommended_design_rules", fn ->

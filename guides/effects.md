@@ -35,6 +35,10 @@ defmodule MyApp.EffectsTest do
   test "writes are authorized" do
     writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app, policy: MyApp.Policy)
   end
+
+  test "private records are read by their owners" do
+    reads_are_authorized(modules_matching("MyAppWeb.Account.**"), app: :my_app, policy: MyApp.Policy)
+  end
 end
 ```
 
@@ -219,7 +223,36 @@ modules_matching("MyAppWeb.**")
 
 ---
 
-## 7. What counts as an effect
+## 7. Reads are authorized
+
+`reads_are_authorized/2` flags an endpoint that loads a record by a key the request sends, with nothing tying the read
+to the user asking. Anyone signed in can then read anyone's record by changing the id in the URL.
+
+```elixir
+# flagged: shows whichever order the id names
+def show(conn, %{"id" => id}), do: json(conn, Orders.get_order!(id))
+
+# fixed: the context scopes the read to the current user
+def show(conn, %{"id" => id}), do: json(conn, Orders.get_order!(conn.assigns.current_user, id))
+```
+
+It follows what the request sends — an action's, event's or message's params, a LiveView's URL params, a channel's
+topic and payload — through the functions it's passed to, converted or not, as `String.to_integer(id)` is, into the
+key of a repo's `get/2,3`, `get!/2,3`, `get_by/2,3` or `get_by!/2,3`. Endpoints are those `writes_are_authorized/2`
+checks, and a LiveView's `mount/3` and `handle_params/3` and a channel's `join/3`. A read passes on the same terms as
+a write, except that a GET route is a read like any other:
+
+- the call that leads to it is given the user asking, or a record a LiveView loaded for them;
+- it's made in a helper that reads the user, as one that loads an organization and then checks the user's role in
+  it does;
+- or a policy checks the endpoint.
+
+Many records are public by design: published posts, packages, profiles. So this rule isn't in
+`ArchTest.Recommended`: point it at the endpoints that show private data.
+
+---
+
+## 8. What counts as an effect
 
 An effect is a call to a library that touches the outside world, or to a project function that makes one:
 

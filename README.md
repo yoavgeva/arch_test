@@ -345,6 +345,10 @@ defmodule MyApp.EffectsTest do
   test "writes are authorized" do
     writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app, policy: MyApp.Policy)
   end
+
+  test "private records are read by their owners" do
+    reads_are_authorized(modules_matching("MyAppWeb.Account.**"), app: :my_app, policy: MyApp.Policy)
+  end
 end
 ```
 
@@ -388,6 +392,11 @@ channel messages that write to the database with nothing tying the change to
 the user asking: the call that writes isn't given the current user or scope,
 and no policy, plug or router pipeline checks permissions. Leave public
 endpoints such as sign-up and log-in out of the subject.
+
+**`reads_are_authorized`** flags endpoints that load a record by an id the
+request sends, as `Repo.get!(Order, params["id"])` does, with nothing tying
+the read to the user asking, so anyone can read anyone's order by changing
+the URL. Point it at the endpoints that show private data.
 
 The rules read the code from debug info, after macro expansion, so aliases,
 imports and `use` are resolved. See the [effects guide](guides/effects.md) for
@@ -491,6 +500,50 @@ See the [API guide](guides/api.md).
 
 ---
 
+## Data
+
+`ArchTest.Data` checks how code treats stored data:
+
+```elixir
+defmodule MyApp.DataTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.Data
+
+  test "requests can't set privileged fields" do
+    no_mass_assignment(modules_matching("MyAppWeb.**"), app: :my_app, policy: MyApp.Policy)
+  end
+
+  test "no lost updates" do
+    no_lost_updates(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "money isn't a float" do
+    no_float_money(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "pages don't load whole tables" do
+    no_unbounded_queries(modules_matching("MyAppWeb.**"), app: :my_app)
+  end
+end
+```
+
+- **`no_mass_assignment`** follows the request's params into
+  `Ecto.Changeset.cast/3,4` and flags privileged fields cast from them, such as
+  `role`, `admin`, `user_id` or `confirmed_at`: any user can set them on their
+  own account.
+- **`no_lost_updates`** flags a field set from its own old value, as
+  `change(post, views: post.views + 1)`, outside an optimistic lock or a
+  `FOR UPDATE` lock held in a transaction: two requests at once lose one change.
+- **`no_float_money`** flags schema and struct fields named for money, such as
+  `price` or `total_amount`, stored as floats.
+- **`no_unbounded_queries`** flags endpoints that reach `Repo.all/1` on a whole
+  table, with no `where`, `limit` or aggregate.
+
+See the [data guide](guides/data.md).
+
+---
+
 ## Test code
 
 `ArchTest.TestCode` checks your tests against your code. ExUnit compiles test
@@ -585,7 +638,8 @@ end
 `ArchTest.Recommended` runs the design rules worth holding any project to —
 N+1 queries, GenServer init, I/O in transactions, process interfaces and
 supervision, waits with limits, flag arguments, string choices, alternative
-return types, the test rules and the guardrails — and reports what each finds in one test:
+return types, mass assignment, lost updates, float money, the test rules and
+the guardrails — and reports what each finds in one test:
 
 ```elixir
 test "recommended design rules" do

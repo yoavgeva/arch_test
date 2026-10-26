@@ -34,6 +34,10 @@ defmodule ArchTest.Effects do
         test "writes are authorized" do
           writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app, policy: MyApp.Policy)
         end
+
+        test "private records are read by their owners" do
+          reads_are_authorized(modules_matching("MyAppWeb.Account.**"), app: :my_app, policy: MyApp.Policy)
+        end
       end
 
   Each violation names the file and line, the path to the effect, and how to fix it.

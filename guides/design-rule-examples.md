@@ -1,7 +1,7 @@
 # Design Rule Examples
 
-Every design rule of `ArchTest.Effects`, `ArchTest.Processes`, `ArchTest.API`, `ArchTest.TestCode` and
-`ArchTest.Guardrails`, with
+Every design rule of `ArchTest.Effects`, `ArchTest.Processes`, `ArchTest.API`, `ArchTest.Data`, `ArchTest.TestCode`
+and `ArchTest.Guardrails`, with
 code it flags, marked `# ✗`, and under **Fixed** the files that change to fix it. The examples are a small `Shop` app
 whose `Shop.Repo` is an Ecto repo. A test compiles every example and runs its rule on it, so they show what the rules
 really do.
@@ -223,6 +223,57 @@ defmodule Shop.Orders do
 
   def cancel_order(user, id),
     do: Order |> Repo.get_by!(id: id, user_id: user.id) |> Order.cancel() |> Repo.update()
+end
+```
+
+</details>
+
+### `reads_are_authorized`
+
+`ArchTest.Effects.reads_are_authorized(modules_matching("ShopWeb.**"))`
+
+An endpoint that loads a record by the id it's sent shows anyone's record to whoever changes the id in the URL.
+
+```elixir
+defmodule ShopWeb.OrderController do
+  use ShopWeb, :controller
+  alias Shop.Orders
+
+  # ✗ shows whichever order the id names, whoever asks
+  def show(conn, %{"id" => id}), do: json(conn, Orders.get_order!(id))
+end
+```
+
+```elixir
+defmodule Shop.Orders do
+  alias Shop.{Order, Repo}
+
+  def get_order!(id), do: Repo.get!(Order, id)
+end
+```
+
+```elixir
+defmodule Shop.Order do
+  defstruct [:id, :user_id, :status]
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule ShopWeb.OrderController do
+  use ShopWeb, :controller
+  alias Shop.Orders
+
+  def show(conn, %{"id" => id}), do: json(conn, Orders.get_order!(conn.assigns.current_user, id))
+end
+```
+
+```elixir
+defmodule Shop.Orders do
+  alias Shop.{Order, Repo}
+
+  def get_order!(user, id), do: Repo.get_by!(Order, id: id, user_id: user.id)
 end
 ```
 
@@ -507,6 +558,186 @@ defmodule Shop.Quantity do
   end
 
   def parse_with_rest(text), do: Integer.parse(text)
+end
+```
+
+</details>
+
+## Data
+
+### `no_mass_assignment`
+
+`ArchTest.Data.no_mass_assignment(modules_matching("ShopWeb.**"))`
+
+A changeset that casts `role` from the params lets any user who adds `user[role]=admin` to the form make themselves an
+admin, though the endpoint only changes their own account.
+
+```elixir
+defmodule ShopWeb.AccountController do
+  use ShopWeb, :controller
+  alias Shop.Accounts
+
+  # ✗ the params reach User.changeset/2, which casts :role
+  def update(conn, %{"user" => params}) do
+    {:ok, user} = Accounts.update_user(conn.assigns.current_user, params)
+    json(conn, user)
+  end
+end
+```
+
+```elixir
+defmodule Shop.Accounts do
+  alias Shop.{Repo, User}
+
+  def update_user(user, attrs), do: user |> User.changeset(attrs) |> Repo.update()
+end
+```
+
+```elixir
+defmodule Shop.User do
+  import Ecto.Changeset
+
+  defstruct [:id, :email, :name, :role]
+
+  def changeset(user, attrs), do: cast(user, attrs, [:email, :name, :role])
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.User do
+  import Ecto.Changeset
+
+  defstruct [:id, :email, :name, :role]
+
+  def changeset(user, attrs), do: cast(user, attrs, [:email, :name])
+
+  # For an admin's endpoint, which a policy checks.
+  def role_changeset(user, role), do: change(user, role: role)
+end
+```
+
+</details>
+
+### `no_lost_updates`
+
+`ArchTest.Data.no_lost_updates(modules_matching("Shop.**"))`
+
+Two orders at once both read the same stock, both write their own result, and one sale is lost.
+
+```elixir
+defmodule Shop.Inventory do
+  import Ecto.Changeset
+  alias Shop.Repo
+
+  # ✗ stock is computed from the value read before the write
+  def sell(product, quantity), do: product |> change(stock: product.stock - quantity) |> Repo.update()
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Inventory do
+  import Ecto.Changeset
+  alias Shop.Repo
+
+  # A write that finds the version changed since the read fails instead, so the caller can retry it.
+  def sell(product, quantity) do
+    product
+    |> change(stock: product.stock - quantity)
+    |> optimistic_lock(:lock_version)
+    |> Repo.update()
+  end
+end
+```
+
+</details>
+
+### `no_float_money`
+
+`ArchTest.Data.no_float_money(modules_matching("Shop.**"))`
+
+`0.1 + 0.2` is `0.30000000000000004`, so float totals drift by fractions of a cent.
+
+```elixir
+defmodule Shop.Invoice do
+  use Ecto.Schema
+
+  schema "invoices" do
+    field :number, :string
+    # ✗ a float can't hold most decimal amounts exactly
+    field :total_price, :float
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Invoice do
+  use Ecto.Schema
+
+  schema "invoices" do
+    field :number, :string
+    field :total_price, :decimal
+  end
+end
+```
+
+</details>
+
+### `no_unbounded_queries`
+
+`ArchTest.Data.no_unbounded_queries(modules_matching("ShopWeb.**"))`
+
+A page that loads every row is fast with a hundred products and times out with a million.
+
+```elixir
+defmodule ShopWeb.ProductController do
+  use ShopWeb, :controller
+  alias Shop.Catalog
+
+  # ✗ loads every product there is, on every request
+  def index(conn, _params), do: json(conn, Catalog.list_products())
+end
+```
+
+```elixir
+defmodule Shop.Catalog do
+  alias Shop.{Product, Repo}
+
+  def list_products, do: Repo.all(Product)
+end
+```
+
+```elixir
+defmodule Shop.Product do
+  defstruct [:id, :name, :price_cents]
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule ShopWeb.ProductController do
+  use ShopWeb, :controller
+  alias Shop.Catalog
+
+  def index(conn, %{"page" => page}), do: json(conn, Catalog.list_products(String.to_integer(page)))
+end
+```
+
+```elixir
+defmodule Shop.Catalog do
+  import Ecto.Query
+  alias Shop.{Product, Repo}
+
+  @per_page 50
+
+  def list_products(page),
+    do: Product |> limit(@per_page) |> offset(^((page - 1) * @per_page)) |> Repo.all()
 end
 ```
 
