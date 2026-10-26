@@ -5,50 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- `ArchTest.Effects.no_io_in_transactions/2` flags HTTP requests, network
-  calls, email and published messages inside `Repo.transaction/1`,
-  `Repo.transact/1` or `Ecto.Multi.run/3`, directly or through the functions
-  they call: a rollback can't take them back, and the transaction holds its
-  connection while they wait.
-- `ArchTest.Guardrails.no_swallowed_errors/2` flags catch-all handlers that
-  turn an error from the outside world into success, such as `rescue _ -> nil`
-  or `{:error, _} -> nil`, and `{:error, _}` results thrown away. Errors passed
-  on or recorded, parsers' errors, predicates, cleanup and Mix tasks pass.
-- Two effect kinds, `:mail` (Swoosh, Bamboo, `:gen_smtp_client`) and `:publish`
-  (`Phoenix.PubSub` and channel broadcasts, AMQP, Kafka), which
-  `should_be_free_of_side_effects/2` accepts in `allow:`.
-- `ArchTest.Effects.writes_are_authorized/2` flags controller actions,
-  LiveView events and channel messages that write to the database with
-  nothing tying the change to the user asking: the call that writes isn't
-  given the current user or scope, and no policy, plug or router pipeline
-  checks permissions. `policy:` names a project's policy modules and plugs.
-- `ArchTest.Processes.no_unbounded_waits/2` flags `:infinity` timeouts,
-  `receive` without `after`, and `:gen_tcp`, `:ssl` and `:httpc` calls that
-  wait forever by default. A process's own receive loop, and a receive that
-  takes the `:DOWN` of the process it waits on, pass.
-- `ArchTest.API`, rules about what public functions take and return:
-  - `no_flag_arguments/2` flags boolean parameters a function branches on.
-  - `typed_identifiers/2` flags functions taking two or more `*_id`
-    parameters, which a call can swap.
-  - `no_stringly_typed_choices/2` flags clause heads or a `case` matching
-    three or more strings, other than a parser's.
-  - `no_alternative_return_types/2` flags options that change the kind of
-    value a function returns, from Elixir's design anti-patterns.
-- `no_io_in_transactions/2`, `no_swallowed_errors/2`, `no_unbounded_waits/2`,
-  `no_flag_arguments/2`, `no_stringly_typed_choices/2` and
-  `no_alternative_return_types/2` are part of `ArchTest.Recommended`;
-  `writes_are_authorized/2` and `typed_identifiers/2`, which need a project's
-  own judgement, aren't.
-
-### Changed
-
-- `Phoenix.PubSub` broadcasts count as `:publish` rather than `:process`;
-  subscribing is still `:process`.
-
 ## [0.4.0] - 2026-10-26
 
 ### Added
@@ -88,10 +44,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `{:error, :not_implemented}`.
   - `no_functions_only_tests_call/2` flags `@doc false` functions only tests
     call.
+- `ArchTest.Effects.no_io_in_transactions/2` flags HTTP requests, network
+  calls, email and published messages inside `Repo.transaction/1`,
+  `Repo.transact/1` or `Ecto.Multi.run/3`, directly or through the functions
+  they call: a rollback can't take them back, and the transaction holds its
+  connection while they wait.
+- `ArchTest.Guardrails.no_swallowed_errors/2` flags catch-all handlers that
+  turn an error from the outside world into success, such as `rescue _ -> nil`
+  or `{:error, _} -> nil`, and `{:error, _}` results thrown away. Errors passed
+  on or recorded, parsers' errors, predicates, cleanup and Mix tasks pass.
+- Two effect kinds, `:mail` (Swoosh, Bamboo, `:gen_smtp_client`) and `:publish`
+  (`Phoenix.PubSub` and channel broadcasts, AMQP, Kafka), which
+  `should_be_free_of_side_effects/2` accepts in `allow:`.
+- `ArchTest.Effects.writes_are_authorized/2` flags controller actions,
+  LiveView events and channel messages that write to the database with
+  nothing tying the change to the user asking: the call that writes isn't
+  given the current user or scope, and no policy, plug or router pipeline
+  checks permissions. `policy:` names a project's policy modules and plugs.
+- `ArchTest.Processes.no_unbounded_waits/2` flags `:infinity` timeouts,
+  `receive` without `after`, and `:gen_tcp`, `:ssl` and `:httpc` calls that
+  wait forever by default. A process's own receive loop, and a receive that
+  takes the `:DOWN` of the process it waits on, pass.
+- `ArchTest.API`, rules about what public functions take and return:
+  - `no_flag_arguments/2` flags boolean parameters a function branches on.
+  - `typed_identifiers/2` flags functions taking two or more `*_id`
+    parameters, which a call can swap.
+  - `no_stringly_typed_choices/2` flags clause heads or a `case` matching
+    three or more strings, other than a parser's.
+  - `no_alternative_return_types/2` flags options that change the kind of
+    value a function returns, from Elixir's design anti-patterns.
 - `ArchTest.Recommended.check/2` runs the design rules worth holding any
   project to, and reports what each finds in one assertion, with an `:except`
-  option. `mix arch_test.gen.design` writes a test running it, frozen.
-- The effects, processes and test code guides, and the design rule examples
+  option. `mix arch_test.gen.design` writes a test running it, frozen. It leaves out
+  `should_be_free_of_side_effects/2`, `processes_hold_state/2`,
+  `writes_are_authorized/2` and `typed_identifiers/2`, which need a project's
+  own judgement.
+- The effects, processes, API and test code guides, and the design rule examples
   guide, whose examples a test compiles and checks.
 - CI runs on Elixir 1.20 and OTP 29.
 
@@ -111,6 +99,15 @@ failing test first:
   is a write, not a query.
 - Sleeps in polling helpers, in fakes without tests, and
   `Process.sleep(:infinity)` aren't flagged.
+- A swallowed error counts only when it comes from the outside world, or code
+  calling through a module chosen at runtime; parsers' errors, predicates,
+  releases and Mix tasks pass.
+- A write is authorized when the user asking reaches the call that writes,
+  through assigns, `current_*` helpers, `case` bindings or `conn`/`socket`
+  handed on, or when a router pipeline to the action runs a policy.
+- A process's receive loop through its module's functions, and a receive that
+  takes the `:DOWN` of the process it waits on, aren't unbounded waits.
+- Tests reach their subject through helpers imported with `only:`.
 
 ### Fixed
 
