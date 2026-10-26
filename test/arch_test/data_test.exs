@@ -110,6 +110,11 @@ defmodule ArchTest.DataTest do
            end)
          end
 
+         def spend(query, amount) do
+           account = lock_account(query)
+           account |> Ecto.Changeset.change(balance: account.balance - amount) |> Repo.update()
+         end
+
          def refund(account, amount) do
            account
            |> Ecto.Changeset.change(balance: account.balance + amount)
@@ -276,7 +281,8 @@ defmodule ArchTest.DataTest do
   end
 
   describe "no_lost_updates/2" do
-    test "flags fields set from their old value before a write, and passes locks, atomic updates and neighbours" do
+    test "flags fields set from their old value before a write, and passes locks in transactions, atomic updates " <>
+           "and neighbours" do
       violations = capture(&Data.no_lost_updates/2, "DataFixture.**")
 
       assert Enum.map(violations, &{&1.module, &1.caller_function, &1.line, &1.message}) == [
@@ -286,7 +292,10 @@ defmodule ArchTest.DataTest do
                {DataFixture.Ads, {:add_tag, 2}, 7,
                 "sets :tags from its old value: a request that changes it between the read and this write " <>
                   "is lost"},
-               {DataFixture.Ads, {:credit, 2}, 32,
+               {DataFixture.Ads, {:spend, 2}, 26,
+                ~s(sets :balance from its old value: its lock: "FOR UPDATE" ends with the read, since no ) <>
+                  "transaction holds it, so a request that changes it between the read and this write is lost"},
+               {DataFixture.Ads, {:credit, 2}, 37,
                 "sets :balance from its old value: a request that changes it between the read and this write " <>
                   "is lost"}
              ]

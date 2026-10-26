@@ -134,8 +134,9 @@ defmodule ArchTest.Data do
   `change(post, views: post.views + 1)`, `change(list, %{tags: list.tags ++ [tag]})` and
   `put_change(changeset, :balance, changeset.data.balance - amount)` compute the new value from the one read before.
   Two requests at once both read the same value, and the second write undoes the first. A change is flagged when
-  the function, or one that calls it, writes to the database, and neither locks the row: with
-  `lock: "FOR UPDATE"` in a query it makes or calls, or with `Ecto.Changeset.optimistic_lock/3`. Change the value
+  the function, or one that calls it, writes to the database, and neither locks the row: with `Ecto.Changeset.optimistic_lock/3`, or with
+  `lock: "FOR UPDATE"` in a query it makes or calls, inside a transaction it, or its caller, opens around the work. A
+  lock taken outside a transaction ends with the read that takes it. Change the value
   in the database instead, as `Repo.update_all(query, inc: [views: 1])` does.
   """
   @spec no_lost_updates(ModuleSet.t(), keyword()) :: :ok
@@ -150,13 +151,19 @@ defmodule ArchTest.Data do
           not info.injected and info.derived != [],
           around = [key | Map.get(callers, key, [])],
           Enum.any?(around, &Map.has_key?(Map.get(effects, &1, %{}), :db_write)),
-          not Enum.any?(around, &(Map.has_key?(locking, &1) or optimistic?(code.functions[&1]))),
+          not Enum.any?(around, &optimistic?(code.functions[&1])),
+          not (locked?(around, locking) and in_transaction?(key, around, code, effects)),
           change <- Enum.uniq_by(info.derived, & &1.field) do
+        why =
+          if locked?(around, locking),
+            do: ~s(its lock: "FOR UPDATE" ends with the read, since no transaction holds it, so ),
+            else: ""
+
         Rules.violation(code, "no_lost_updates", key,
           line: change.line,
           message:
-            "sets #{inspect(change.field)} from its old value: a request that changes it between the read and " <>
-              "this write is lost",
+            "sets #{inspect(change.field)} from its old value: #{why}a request that changes it between the read " <>
+              "and this write is lost",
           fix:
             "change it in the database, as Repo.update_all(query, inc: [#{change.field}: 1]) does, or read the " <>
               ~s(row with lock: "FOR UPDATE" in the transaction that writes it, or add optimistic_lock/3)
@@ -276,6 +283,22 @@ defmodule ArchTest.Data do
       acc -> Map.update(acc, target, [caller], &[caller | &1])
     end
   end
+
+  defp locked?(around, locking), do: Enum.any?(around, &Map.has_key?(locking, &1))
+
+  # Whether the function's work runs in a transaction: one it opens, or one its caller opens around the call.
+  defp in_transaction?(key, around, code, effects) do
+    Enum.any?(around, fn function ->
+      Enum.any?(code.functions[function].calls, fn call ->
+        (function == key or call.target == key) and opened_by_transaction?(call, code, effects)
+      end)
+    end)
+  end
+
+  defp opened_by_transaction?(%{inside: %{target: opener}}, code, effects),
+    do: Rules.transaction?(opener, code, effects)
+
+  defp opened_by_transaction?(_call, _code, _effects), do: false
 
   defp optimistic?(info),
     do: Enum.any?(info.calls, &match?(%{target: {Ecto.Changeset, :optimistic_lock, _}}, &1))

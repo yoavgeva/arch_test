@@ -32,6 +32,22 @@ defmodule ArchTest.Code.Rules do
   end
 
   @doc false
+  # A call that opens a transaction: Ecto.Multi.run, or transaction/transact on a repo, which declares the Ecto.Repo
+  # behaviour or reaches Ecto.Repo.Transaction, as a facade over one does.
+  @spec transaction?(Code.key(), Code.t(), Effects.effects()) :: boolean()
+  def transaction?({Ecto.Multi, :run, _arity}, _code, _effects), do: true
+
+  def transaction?({module, _name, _arity} = target, code, effects) do
+    Ecto.Repo in Code.behaviours(code, module) or module == Ecto.Repo.Transaction or
+      reaches_transaction?(effects[target][:db_write])
+  end
+
+  defp reaches_transaction?([_ | _] = path),
+    do: path |> List.last() |> Map.fetch!(:target) |> elem(0) == Ecto.Repo.Transaction
+
+  defp reaches_transaction?(_path), do: false
+
+  @doc false
   # How a message names `target`, called from `caller`: `load/1` for the caller's own functions, `send/2` for
   # Kernel's, and `MyApp.Repo.get!/2` for the rest.
   @spec name(Code.key(), module()) :: String.t()

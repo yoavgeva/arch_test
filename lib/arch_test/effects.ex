@@ -195,7 +195,7 @@ defmodule ArchTest.Effects do
       for module <- modules,
           {{^module, name, arity}, info} <- Code.functions_of(code, module),
           %{inside: %{} = opener} = call <- info.calls,
-          transaction?(opener.target, code, effects),
+          Rules.transaction?(opener.target, code, effects),
           {call, path} <- List.wrap(first_effect([call], @outside, effects)) do
         kind = Rules.kind(call.target, @outside, effects)
 
@@ -371,20 +371,6 @@ defmodule ArchTest.Effects do
 
     Rules.report(violations, "no_work_in_init")
   end
-
-  # A call that opens a transaction: Ecto.Multi.run, or transaction/transact on a repo, which declares the Ecto.Repo
-  # behaviour or reaches Ecto.Repo.Transaction, as a facade over one does.
-  defp transaction?({Ecto.Multi, :run, _arity}, _code, _effects), do: true
-
-  defp transaction?({module, _name, _arity} = target, code, effects) do
-    Ecto.Repo in Code.behaviours(code, module) or module == Ecto.Repo.Transaction or
-      reaches_transaction?(effects[target][:db_write])
-  end
-
-  defp reaches_transaction?([_ | _] = path),
-    do: path |> List.last() |> Map.fetch!(:target) |> elem(0) == Ecto.Repo.Transaction
-
-  defp reaches_transaction?(_path), do: false
 
   # A query the target makes, with the path to it: the target itself, or what it reaches.
   defp query(target, effects) do
