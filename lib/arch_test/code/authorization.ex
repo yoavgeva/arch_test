@@ -91,12 +91,48 @@ defmodule ArchTest.Code.Authorization do
   @doc false
   # Whether a policy checks the endpoint: it, its controller's plug pipeline, or its LiveView's own `on_mount` hooks,
   # call one, directly or through what they call, or every route to it goes through a pipeline or `live_session` hook
-  # that does.
+  # that does, or it's a LiveComponent's and every LiveView that renders it checks one.
   @spec checked?(Code.t(), routes(), Code.key(), [module()]) :: boolean()
   def checked?(code, routes, endpoint, policies),
     do:
       checks_policy?(code, endpoint, policies) or
-        routed_through_policy?(routes, endpoint, policies, code)
+        routed_through_policy?(routes, endpoint, policies, code) or
+        parents_check?(code, routes, endpoint, policies, MapSet.new())
+
+  # A LiveComponent runs in the process of the LiveViews that render it, on the assigns they give it, so a parent that
+  # checks a policy when it mounts, in `handle_params/3`, in its hooks or on its routes, checks the component's events
+  # too. A parent that is a component itself is checked by its own parents.
+  defp parents_check?(code, routes, {component, _, _}, policies, seen) do
+    parents =
+      if Phoenix.LiveComponent in Code.behaviours(code, component),
+        do: renderers(code, component),
+        else: []
+
+    parents != [] and
+      Enum.all?(parents, fn parent ->
+        mounted = for name <- [:mount, :handle_params], do: {parent, name, 3}
+
+        Enum.any?(mounted ++ [{parent, :__live__, 0}], &checks_policy?(code, &1, policies)) or
+          Enum.any?(mounted, &routed_through_policy?(routes, &1, policies, code)) or
+          (not MapSet.member?(seen, parent) and
+             parents_check?(
+               code,
+               routes,
+               {parent, :render, 1},
+               policies,
+               MapSet.put(seen, component)
+             ))
+      end)
+  end
+
+  # The modules whose code names the component, as a LiveView's `render/1` does with `<.live_component module={...}>`.
+  defp renderers(code, component) do
+    for {{module, _, _}, info} <- code.functions,
+        module != component,
+        MapSet.member?(info.references, component),
+        uniq: true,
+        do: module
+  end
 
   defp checks_policy?(code, {module, _, _} = endpoint, policies) do
     # `on_mount` in a LiveView compiles into its __live__/0, as a capture of each hook's on_mount/4.

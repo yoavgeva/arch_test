@@ -236,7 +236,8 @@ defmodule ArchTest.Effects do
     is given the user by its parent;
   - it, one of its controller's plugs, every router pipeline to it, or an `on_mount` hook of its LiveView, in the
     LiveView or in every `live_session` to it, calls a policy: `Bodyguard`, `Canada`, or a module given as
-    `policy:`;
+    `policy:`, or, for a LiveComponent's events, every LiveView that renders it does when it mounts or in its
+    `handle_params/3`, hooks or routes;
   - or every route to it is a GET or HEAD: a request to read, so what it writes is bookkeeping, as a cache or a
     view count is.
 

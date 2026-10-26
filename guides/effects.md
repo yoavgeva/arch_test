@@ -207,7 +207,9 @@ end
   count is;
 - **or a policy is checked**: the endpoint, one of its controller's plugs, a pipeline every route to the action
   goes through, as `pipe_through :require_admin` does, or, for a LiveView's events, its own `on_mount` hooks or
-  those of the `live_session` every route to it is in, calls `Bodyguard`, `Canada`, or a module given as `policy:`:
+  those of the `live_session` every route to it is in, calls `Bodyguard`, `Canada`, or a module given as `policy:`.
+  A LiveComponent runs in the process of the LiveViews that render it, so its events are checked when every one of
+  them checks when it mounts, in `handle_params/3`, in its hooks or on its routes:
 
 ```elixir
 writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app,

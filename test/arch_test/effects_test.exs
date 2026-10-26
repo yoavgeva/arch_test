@@ -427,6 +427,54 @@ defmodule ArchTest.EffectsTest do
          end
        end
 
+       # A modal that deletes what its parent gave it: the parents check the user may, before they render it.
+       defmodule EffectsFixture.PostDeleteModal do
+         @behaviour Phoenix.LiveComponent
+
+         def handle_event("delete", _params, socket) do
+           EffectsFixture.Posts.update_post(socket.assigns.id, %{deleted: true})
+           {:noreply, socket}
+         end
+       end
+
+       defmodule EffectsFixture.PostTrashLive do
+         @behaviour Phoenix.LiveView
+
+         def handle_params(%{"id" => id}, _url, socket) do
+           EffectsFixture.Policy.authorize!(socket.assigns.current_user, :delete, id)
+           {:noreply, Map.put(socket, :post_id, id)}
+         end
+
+         def render(assigns), do: {EffectsFixture.PostDeleteModal, assigns.post_id}
+       end
+
+       # One parent that checks, and one that doesn't.
+       defmodule EffectsFixture.PostHideModal do
+         @behaviour Phoenix.LiveComponent
+
+         def handle_event("hide", _params, socket) do
+           EffectsFixture.Posts.update_post(socket.assigns.id, %{hidden: true})
+           {:noreply, socket}
+         end
+       end
+
+       defmodule EffectsFixture.PostShelfLive do
+         @behaviour Phoenix.LiveView
+
+         def mount(_params, _session, socket) do
+           EffectsFixture.Policy.authorize!(socket.assigns.current_user, :hide, nil)
+           {:ok, socket}
+         end
+
+         def render(assigns), do: {EffectsFixture.PostHideModal, assigns}
+       end
+
+       defmodule EffectsFixture.PostPublicLive do
+         @behaviour Phoenix.LiveView
+
+         def render(assigns), do: {EffectsFixture.PostHideModal, assigns}
+       end
+
        # `on_mount EffectsFixture.PostAdminHook` in the LiveView itself, as Phoenix compiles it into __live__/0.
        defmodule EffectsFixture.PostArchiveLive do
          @behaviour Phoenix.LiveView
@@ -701,6 +749,9 @@ defmodule ArchTest.EffectsTest do
                 "writes to the database through EffectsFixture.Posts.update_post/2, which reaches " <>
                   "EffectsFixture.Repo.update/1" <> unchecked},
                {EffectsFixture.PostPreviewLive, {:handle_event, 3}, 256,
+                "writes to the database through EffectsFixture.Posts.update_post/2, which reaches " <>
+                  "EffectsFixture.Repo.update/1" <> unchecked},
+               {EffectsFixture.PostHideModal, {:handle_event, 3}, 287,
                 "writes to the database through EffectsFixture.Posts.update_post/2, which reaches " <>
                   "EffectsFixture.Repo.update/1" <> unchecked}
              ]
