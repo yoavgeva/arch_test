@@ -85,7 +85,8 @@ def sell(product, quantity), do: Repo.update_all(where(Product, id: ^product.id)
 ```
 
 `no_lost_updates/2` flags `change/2`, `cast/3`, `put_change/3` and `force_change/3` setting a field from the old value
-of the same field: arithmetic, `Decimal` arithmetic, `++` and `<>`, as `post.views + 1` and `list.tags ++ [tag]` are.
+of the same field: arithmetic, `Decimal` arithmetic and `++`, as `post.views + 1` and `list.tags ++ [tag]` are.
+Formatting a string, as `"New " <> post.title` does, isn't counting.
 A value made from other records, such as a position between two neighbours, isn't one. It's flagged when the function,
 or one that calls it, writes to the database, and the row isn't locked:
 

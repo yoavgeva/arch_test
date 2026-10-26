@@ -95,7 +95,7 @@ defmodule ArchTest.DataTest do
 
          def add_tag(ad, tag), do: ad |> Ecto.Changeset.change(%{tags: ad.tags ++ [tag]}) |> Repo.update()
 
-         def rename(ad, name), do: ad |> Ecto.Changeset.change(name: name) |> Repo.update()
+         def rename(ad, name), do: ad |> Ecto.Changeset.change(name: "New " <> ad.name <> name) |> Repo.update()
 
          def track_view(query), do: Repo.update_all(query, inc: [views: 1])
 
