@@ -95,11 +95,14 @@ defmodule ArchTest.EffectsTest do
 
          defp load(id), do: Repo.get!(:orders, id)
 
-         def ping_all(urls), do: Enum.each(urls, fn url -> ping(url) end)
+         def purge_all(urls), do: Enum.each(urls, fn url -> purge(url) end)
+
+         def embed_all(texts), do: Enum.map(texts, fn text -> embed(text) end)
 
          def copy_all(ids), do: Enum.map(ids, fn id -> copy_order(id) end)
 
-         defp ping(url), do: HTTPoison.post(url, "", [])
+         defp purge(url), do: HTTPoison.post(url, "", [])
+         defp embed(text), do: HTTPoison.post("https://embed.example.com", text, [])
          defp copy_order(id), do: Repo.get!(:orders, id)
        end
        """},
@@ -388,7 +391,9 @@ defmodule ArchTest.EffectsTest do
                {{:lines, 1}, 38,
                 "queries the database once per item: for calls EffectsFixture.Repo.all/1"},
                {{:titles, 1}, 47,
-                "queries the database once per item: Enum.map/2 calls EffectsFixture.Repo.query!/2"}
+                "queries the database once per item: Enum.map/2 calls EffectsFixture.Repo.query!/2"},
+               {{:embed_all, 1}, 57,
+                "makes an HTTP request once per item: Enum.map/2 calls embed/1, which reaches HTTPoison.post/3"}
              ]
     end
 

@@ -444,15 +444,7 @@ defmodule ArchTest.Effects do
       command?(target) -> nil
       Reach.seed(target) in @queries -> {Reach.seed(target), []}
       Reach.seed(target) != nil -> nil
-      true -> Enum.find_value(@queries, &query_path(&1, effects[target]))
-    end
-  end
-
-  # An HTTP path that ends in a command, as `HTTPoison.post/3` is, writes rather than queries.
-  defp query_path(kind, effects) do
-    case with_path(kind, effects) do
-      {:http, [_ | _] = path} = found -> if command?(List.last(path).target), do: nil, else: found
-      found -> found
+      true -> Enum.find_value(@queries, &with_path(&1, effects[target]))
     end
   end
 
