@@ -26,6 +26,49 @@ defmodule ArchTest.EffectsTest do
          def delete(struct, opts \\\\ []), do: Ecto.Repo.Schema.delete(__MODULE__, struct, opts)
          def query!(sql, params), do: Ecto.Adapters.SQL.query!(__MODULE__, sql, params)
          def transaction(fun, opts \\\\ []), do: Ecto.Repo.Transaction.transaction(__MODULE__, fun, opts)
+         def in_transaction?, do: Ecto.Repo.Transaction.in_transaction?(__MODULE__)
+       end
+       """},
+      {"lib/effects_fixture/replica.ex",
+       """
+       defmodule EffectsFixture.ReplicaController do
+         @behaviour Plug
+
+         def init(action), do: action
+         def call(conn, action), do: phoenix_controller_pipeline(conn, action)
+
+         def stats(conn, %{"id" => id}) do
+           if EffectsFixture.Repo.in_transaction?(), do: conn, else: Map.put(conn, :id, id)
+         end
+
+         defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
+       end
+
+       defmodule EffectsFixture.CheckedController do
+         @behaviour Plug
+         alias EffectsFixture.Posts
+
+         def init(action), do: action
+         def call(conn, action), do: phoenix_controller_pipeline(conn, action)
+
+         def rename(conn, %{"id" => id, "title" => title}) do
+           Posts.update_own_post(conn.assigns.subject, id, %{title: title})
+         end
+
+         def publish(conn, %{"id" => id}) do
+           post = Posts.get_post(id)
+
+           if post.user_id == conn.assigns.current_user.id,
+             do: Posts.update_post(post.id, %{published: true}),
+             else: conn
+         end
+
+         def unpublish(conn, %{"id" => id}) do
+           post = Posts.get_post(id)
+           if post.user_id != nil, do: Posts.update_post(post.id, %{published: false}), else: conn
+         end
+
+         defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
        end
        """},
       {"lib/effects_fixture/accounts.ex",
@@ -637,6 +680,20 @@ defmodule ArchTest.EffectsTest do
       assert hd(violations).fix ==
                "pass the current user or scope to the code that writes, and scope the change to it, or check " <>
                  "EffectsFixture.Policy or EffectsFixture.PostRequireAdmin first"
+    end
+  end
+
+  describe "writes_are_authorized/2 and transactions" do
+    test "asking whether a transaction is open writes nothing" do
+      assert capture(&Effects.writes_are_authorized/2, "EffectsFixture.ReplicaController") == []
+    end
+
+    test "an auth subject is the user asking, and a record compared with the user's is checked" do
+      assert Enum.map(
+               capture(&Effects.writes_are_authorized/2, "EffectsFixture.CheckedController"),
+               & &1.caller_function
+             ) ==
+               [{:unpublish, 2}]
     end
   end
 

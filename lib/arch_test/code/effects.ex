@@ -79,6 +79,8 @@ defmodule ArchTest.Code.Effects do
   # Seeds that are only some of a library's functions: the rest build values, as `Req.new/1` does.
   @function_seeds %{
     Ecto.Repo.Queryable => %{delete_all: :db_write, update_all: :db_write},
+    # `in_transaction?/1` asks the process, not the database.
+    Ecto.Repo.Transaction => {~w(transaction transact rollback)a, :db_write},
     Req =>
       {~w(request request! get get! post post! put put! patch patch! delete delete! head head! run run!)a,
        :http},

@@ -64,6 +64,7 @@ defmodule ArchTest.DataTest do
          def update_profile(user, attrs), do: user |> User.profile_changeset(attrs) |> Repo.update()
          def set_roles(user, attrs), do: user |> User.admin_changeset(attrs) |> Repo.update()
          def get_user!(id), do: Repo.get!(User, id)
+         def change_user(user, attrs), do: User.changeset(user, attrs)
        end
 
        defmodule DataFixture.Audit do
@@ -259,6 +260,79 @@ defmodule ArchTest.DataTest do
 
          defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
        end
+
+       defmodule Ecto.Query.FromExpr do
+         defstruct [:source]
+       end
+
+       defmodule Ecto.Query.JoinExpr do
+         defstruct [:on, :params]
+       end
+
+       defmodule DataFixture.Projects do
+         alias DataFixture.Repo
+
+         # As `from p in Post, join: m in assoc(p, :memberships), on: m.project_id == ^project.id` compiles.
+         def posts_in(project) do
+           Repo.all(%{
+             __struct__: Ecto.Query,
+             wheres: [],
+             limit: nil,
+             havings: [],
+             select: nil,
+             joins: [%Ecto.Query.JoinExpr{on: :memberships, params: [{project.id, {1, :project_id}}]}],
+             from: %Ecto.Query.FromExpr{source: {"posts", DataFixture.Blog.Post}}
+           })
+         end
+
+         # A join with nothing pinned still lists every post.
+         def posts_with_authors do
+           Repo.all(%{
+             __struct__: Ecto.Query,
+             wheres: [],
+             limit: nil,
+             havings: [],
+             select: nil,
+             joins: [%Ecto.Query.JoinExpr{on: :author, params: []}],
+             from: %Ecto.Query.FromExpr{source: {"posts", DataFixture.Blog.Post}}
+           })
+         end
+       end
+
+       defmodule DataFixture.ProjectController do
+         @behaviour Plug
+
+         def init(action), do: action
+         def call(conn, action), do: phoenix_controller_pipeline(conn, action)
+
+         def posts(conn, %{"project" => project}), do: Map.put(conn, :posts, DataFixture.Projects.posts_in(project))
+
+         def authors(conn, _params), do: Map.put(conn, :posts, DataFixture.Projects.posts_with_authors())
+
+         defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
+       end
+
+       defmodule DataFixture.OwnPostController do
+         @behaviour Plug
+
+         def init(action), do: action
+         def call(conn, action), do: phoenix_controller_pipeline(conn, action)
+
+         def show(conn, %{"id" => id}) do
+           post = DataFixture.Blog.get_post!(id)
+           if post.user_id == conn.assigns.current_user.id, do: Map.put(conn, :post, post), else: conn
+         end
+
+         defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
+       end
+
+       defmodule DataFixture.UserFormLive do
+         @behaviour Phoenix.LiveComponent
+
+         def handle_event("validate", %{"user" => attrs}, socket) do
+           {:noreply, Map.put(socket, :changeset, DataFixture.Accounts.change_user(socket.assigns.user, attrs))}
+         end
+       end
        """},
       {@billing, @billing_source}
     ])
@@ -351,7 +425,10 @@ defmodule ArchTest.DataTest do
                   "DataFixture.Repo.all/1, so each request loads more as the table grows"},
                {DataFixture.PostIndexLive, {:mount, 3}, 75,
                 "loads every row of DataFixture.Blog.Post through DataFixture.Blog.list_posts/0, which reaches " <>
-                  "DataFixture.Repo.all/1, so each request loads more as the table grows"}
+                  "DataFixture.Repo.all/1, so each request loads more as the table grows"},
+               {DataFixture.ProjectController, {:authors, 2}, 165,
+                "loads every row of DataFixture.Blog.Post through DataFixture.Projects.posts_with_authors/0, which " <>
+                  "reaches DataFixture.Repo.all/1, so each request loads more as the table grows"}
              ]
 
       assert hd(violations).fix ==

@@ -47,8 +47,8 @@ defmodule ArchTest.Code.Data do
   end
 
   @doc false
-  # The calls that list every row of a table: `all/1,2` given a schema, or a query with no `where`, `limit` or
-  # aggregate, as `Repo.all(Post)` and `Post |> order_by(:title) |> Repo.all()` are. A query the function is given, or
+  # The calls that list every row of a table: `all/1,2` given a schema, or a query with no `where`, `limit`, aggregate
+  # or join on a pinned value, as `Repo.all(Post)` and `Post |> order_by(:title) |> Repo.all()` are. A query the function is given, or
   # one another function builds, isn't known, so it isn't counted.
   @spec whole_tables([tuple()]) :: [table()]
   def whole_tables(clauses) do
@@ -182,11 +182,16 @@ defmodule ArchTest.Code.Data do
   defp table({:%{}, _, pairs}, _bound, _depth) do
     if Keyword.get(pairs, :__struct__) == Ecto.Query and Keyword.get(pairs, :wheres) == [] and
          Keyword.get(pairs, :limit) == nil and Keyword.get(pairs, :havings, []) == [] and
-         not aggregates?(Keyword.get(pairs, :select)),
+         not aggregates?(Keyword.get(pairs, :select)) and
+         not pinned?(Keyword.get(pairs, :joins, [])),
        do: source(Keyword.get(pairs, :from))
   end
 
   defp table({{:., _, [Ecto.Query.Builder.Filter, :apply]}, _, _args}, _bound, _depth), do: nil
+
+  defp table({{:., _, [Ecto.Query.Builder.Join, :apply]}, _, [query | rest]}, bound, depth) do
+    if not pinned?(rest), do: table(query, bound, depth + 1)
+  end
 
   defp table(
          {{:., _, [Ecto.Query.Builder.LimitOffset, :apply]}, _, [query, :offset | _]},
@@ -226,6 +231,17 @@ defmodule ArchTest.Code.Data do
   defp schema?(module),
     do:
       module not in [nil, true, false] and String.starts_with?(Atom.to_string(module), "Elixir.")
+
+  # Whether a join takes a value the code pins, as `on: m.project_id == ^project.id` does: then it filters, as a
+  # `where` would.
+  defp pinned?(ast) do
+    ast
+    |> Macro.prewalk(false, fn
+      {:params, [_ | _]} = node, _found -> {node, true}
+      node, found -> {node, found}
+    end)
+    |> elem(1)
+  end
 
   defp aggregates?(ast) do
     ast

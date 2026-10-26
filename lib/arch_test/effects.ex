@@ -225,9 +225,10 @@ defmodule ArchTest.Effects do
   Endpoints are controller actions, a LiveView's or LiveComponent's `handle_event/3` and a channel's `handle_in/3`.
   One that writes, directly or through the functions it calls, passes when:
 
-  - it gives the user asking to the call that writes: the current user or scope, as `conn.assigns.current_user`,
-    `socket.assigns.current_scope`, `Guardian.Plug.current_resource(conn)` or a value made from them, for the code
-    it calls to scope the change to;
+  - it gives the user asking to the call that writes: the current user, scope or auth subject, as
+    `conn.assigns.current_user`, `socket.assigns.current_scope`, `conn.assigns.subject`,
+    `Guardian.Plug.current_resource(conn)` or a value made from them, for the code it calls to scope the change to,
+    or a record it compared with the user's values, as `post.user_id == user.id` checks `post`;
   - the write runs in a function it gives to a helper that reads the user first, as
     `with_own_post(conn, id, fn post -> ... end)` checking the post's owner does;
   - it's a LiveView event that writes to a record the socket's assigns hold, as `socket.assigns.post`, and the

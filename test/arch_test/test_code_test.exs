@@ -409,6 +409,24 @@ defmodule ArchTest.TestCodeTest do
     end
     """)
 
+    write_test("test/test_fixture/router_test.exs", """
+    defmodule TestFixture.RouterTest do
+      use ExUnit.Case, async: true
+
+      defmodule Plug do
+        def unquote(:*)(conn), do: conn
+
+        for verb <- [:get, :post] do
+          def unquote(verb)(conn), do: conn
+        end
+      end
+
+      test "routes every verb" do
+        assert Plug.*(1) == 1
+      end
+    end
+    """)
+
     write_test("test/test_fixture/step_test.exs", """
     defmodule TestFixture.StepTest do
       use ExUnit.Case, async: true

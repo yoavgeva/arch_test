@@ -179,11 +179,12 @@ end
 Endpoints are controller actions, a LiveView's or LiveComponent's `handle_event/3` and a channel's `handle_in/3`. A
 write passes when:
 
-- **it's made on behalf of the user asking**: the call that leads to it is given the current user or scope, as
-  `conn.assigns.current_user`, `socket.assigns.current_scope`, `Guardian.Plug.current_resource(conn)`, a
-  `current_user(conn)` helper, or a value made from them, such as `user.id`. This is how Phoenix's scopes and most
-  contexts authorize: the query only finds the user's own records. A call given `conn` or `socket` is followed, since
-  it can read the user from them;
+- **it's made on behalf of the user asking**: the call that leads to it is given the current user, scope or auth
+  subject, as `conn.assigns.current_user`, `socket.assigns.current_scope`, `conn.assigns.subject`,
+  `Guardian.Plug.current_resource(conn)`, a `current_user(conn)` helper, or a value made from them, such as `user.id`.
+  This is how Phoenix's scopes and most contexts authorize: the query only finds the user's own records. A record
+  compared with the user's values counts too, as `post` does once `post.user_id == user.id` checks it, and so does the
+  read that loaded it. A call given `conn` or `socket` is followed, since it can read the user from them;
 - **it runs in a function given to a helper that reads the user first**, as one that checks the user's role and then
   runs the change does:
 

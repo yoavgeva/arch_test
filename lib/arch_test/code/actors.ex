@@ -17,8 +17,10 @@ defmodule ArchTest.Code.Actors do
 
   alias ArchTest.Code
 
-  @actor ~r/^current_|(^|_)(user|scope|account|actor|member|owner)(_id)?$/
-  @actor_words ~w(user scope account actor member owner)
+  @actor ~r/^current_|(^|_)(user|scope|account|actor|member|owner|subject)(_id)?$/
+  @actor_words ~w(user scope account actor member owner subject)
+  # The comparisons that check a value against another, as `post.user_id == user.id` does, as the compiler writes them.
+  @comparisons [:==, :"/=", :"=:=", :"=/="]
   @requests [:conn, :socket]
 
   @type call :: {Code.key(), pos_integer() | nil}
@@ -38,13 +40,24 @@ defmodule ArchTest.Code.Actors do
       Enum.flat_map(clauses, fn {_meta, args, _guards, body} ->
         bindings = bindings(body)
         actors = args |> pattern_actors() |> spread(bindings)
+
+        # A value compared with the user's, as a post whose owner is, has been checked against them.
+        compared = compared(body, actors)
+        actors = spread(MapSet.union(actors, compared), bindings)
         held = spread_held(MapSet.new(), bindings)
 
         reads =
           if MapSet.size(actors) > 0 or carries?(body, actors), do: [{:reads, true}], else: []
 
+        # A read whose result is then compared with the user's, as `post = get_post!(id)` is, reads on their behalf.
+        checked_reads =
+          for {left, right} <- bindings,
+              Enum.any?(vars(left), &MapSet.member?(compared, &1)),
+              {target, line, _args} <- List.wrap(call(right, module, locals)),
+              do: {:on_behalf, {target, line}}
+
         body
-        |> Macro.prewalk(reads, fn node, acc ->
+        |> Macro.prewalk(reads ++ checked_reads, fn node, acc ->
           {node, classify(node, {actors, held}, module, locals) ++ acc}
         end)
         |> elem(1)
@@ -256,5 +269,27 @@ defmodule ArchTest.Code.Actors do
         {node, acc}
     end)
     |> elem(1)
+  end
+
+  # The variables a comparison checks against the user asking: those on one side of `==` or `!=` when the other side
+  # carries the user, as `post` in `post.user_id == user.id` is.
+  defp compared(body, actors) do
+    body
+    |> Macro.prewalk(MapSet.new(), fn
+      {{:., _, [:erlang, op]}, _, [left, right]} = node, acc when op in @comparisons ->
+        {node, MapSet.union(acc, checked(left, right, actors))}
+
+      node, acc ->
+        {node, acc}
+    end)
+    |> elem(1)
+  end
+
+  defp checked(left, right, actors) do
+    cond do
+      carries?(right, actors) and not carries?(left, actors) -> MapSet.new(vars(left))
+      carries?(left, actors) and not carries?(right, actors) -> MapSet.new(vars(right))
+      true -> MapSet.new()
+    end
   end
 end
