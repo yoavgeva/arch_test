@@ -159,6 +159,9 @@ defmodule ArchTest.Guardrails do
   Asserts that no function in `subject` is a stub: one whose every clause only raises an error saying it isn't
   written yet, such as `raise "not implemented"` or a message with `TODO`, or only returns `:not_implemented` or
   `{:error, :not_implemented}`.
+
+  A behaviour's callback that returns `:not_implemented` or `{:error, :not_implemented}` passes: it's the answer an
+  implementation gives for what it can't do, as a log backend with no queries does. One that raises doesn't.
   """
   @spec no_stubs(ModuleSet.t(), keyword()) :: :ok
   def no_stubs(%ModuleSet{} = subject, opts \\ []) do
@@ -166,8 +169,10 @@ defmodule ArchTest.Guardrails do
 
     violations =
       for module <- modules,
-          {key, info} <- Code.functions_of(code, module),
-          info.stub != nil and not info.injected do
+          {{^module, name, arity} = key, info} <- Code.functions_of(code, module),
+          info.stub != nil and not info.injected,
+          not (String.starts_with?(info.stub, "returns ") and
+                 callback?(code, module, {name, arity})) do
         Rules.violation(code, "no_stubs", key,
           line: info.line,
           message: "is a stub: it only #{info.stub}",
@@ -238,6 +243,20 @@ defmodule ArchTest.Guardrails do
   # Only the project's own sources: not a dependency's, as a module a dependency's macro generates points to.
   defp own?(file) do
     Path.type(file) != :absolute and not String.starts_with?(file, ["deps/", "_build/"])
+  end
+
+  defp callback?(code, module, function) do
+    case code.modules[module] do
+      %{impls: impls, behaviours: behaviours} ->
+        MapSet.member?(impls, function) or
+          case callbacks(behaviours, code) do
+            {:ok, callbacks} -> MapSet.member?(callbacks, function)
+            :error -> false
+          end
+
+      nil ->
+        false
+    end
   end
 
   # The callbacks of every behaviour a module declares, from the behaviour's own BEAM file: the project's, read with

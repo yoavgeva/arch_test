@@ -59,7 +59,8 @@ defmodule ArchTest.Code do
           routes: [route()],
           component_values: MapSet.t(String.t()),
           fields: %{atom() => term()},
-          float_defaults: [atom()]
+          float_defaults: [atom()],
+          macros: MapSet.t({atom(), arity()})
         }
   @type route :: %{
           controller: module(),
@@ -152,7 +153,8 @@ defmodule ArchTest.Code do
               :routes,
               :component_values,
               :fields,
-              :float_defaults
+              :float_defaults,
+              :macros
             ])
           ),
         functions: Map.merge(code.functions, read.functions)
@@ -229,7 +231,13 @@ defmodule ArchTest.Code do
          routes: routes_in(info.definitions),
          component_values: component_values_in(info.definitions),
          fields: Data.fields(info.definitions),
-         float_defaults: Data.float_defaults(info.definitions)
+         float_defaults: Data.float_defaults(info.definitions),
+         macros:
+           for(
+             {{name, arity}, :defmacro, _meta, _clauses} <- info.definitions,
+             into: MapSet.new(),
+             do: {name, arity}
+           )
        }}
     else
       _ -> :error

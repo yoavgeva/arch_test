@@ -142,8 +142,10 @@ defmodule ArchTest.TestSource do
   defp walk({:alias, _, [target | options]}, state),
     do: %{state | aliases: aliases(target, options, state)}
 
+  # A `use`, whose options can name what the test is about, as `use MyApp.PhaseCase, phase: MyApp.Normalize` does.
   defp walk({:use, _, [target | options]}, state) do
     async = options |> List.flatten() |> Keyword.get(:async, false) == true
+    state = walk(options, state)
 
     %{
       state
@@ -169,7 +171,7 @@ defmodule ArchTest.TestSource do
 
   defp walk({kind, _, [head | body]}, state) when kind in [:def, :defp] do
     {name, args} = head(head)
-    labelled(body, "#{name}/#{length(args)}", state)
+    labelled(body, "#{label(name)}/#{length(args)}", state)
   end
 
   defp walk({:fn, _, clauses}, state),
@@ -215,6 +217,11 @@ defmodule ArchTest.TestSource do
   defp walk(_leaf, state), do: state
 
   defp labelled(ast, label, state), do: %{walk(ast, %{state | label: label}) | label: state.label}
+
+  # A name the code computes, as `def unquote(verb)(conn)` does, is labelled as written.
+  defp label(name) when is_atom(name), do: name
+  defp label({:unquote, _, [name]}) when is_atom(name), do: name
+  defp label(name), do: Macro.to_string(name)
 
   defp head({:when, _, [head | _guards]}), do: head(head)
   defp head({name, _, args}) when is_list(args), do: {name, args}

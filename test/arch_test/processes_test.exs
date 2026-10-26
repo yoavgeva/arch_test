@@ -44,6 +44,35 @@ defmodule ArchTest.ProcessesTest do
          def ping, do: send(Cache, :ping)
        end
        """},
+      {"lib/process_fixture/ticker.ex",
+       """
+       defmodule ProcessFixture.Ticker do
+         use GenServer
+
+         def init(state) do
+           schedule()
+           {:ok, state}
+         end
+
+         def handle_info(:tick, state) do
+           schedule()
+           {:noreply, state}
+         end
+
+         defp schedule, do: Process.send_after(self(), :tick, 1_000)
+       end
+
+       defmodule ProcessFixture.SystemWatch do
+         use GenServer
+
+         def init(config) do
+           :erlang.system_monitor(self(), config)
+           {:ok, config}
+         end
+
+         def handle_info(_event, state), do: {:noreply, state}
+       end
+       """},
       {"lib/process_fixture/calculator.ex",
        """
        defmodule ProcessFixture.Calculator do
@@ -266,6 +295,15 @@ defmodule ArchTest.ProcessesTest do
            end
 
            :ok
+         end
+
+         def discard_io do
+           receive do
+             {:io_request, from, ref, _request} -> send(from, {:io_reply, ref, :ok})
+             _other -> :ok
+           end
+
+           discard_io()
          end
 
          def run_linked(fun) do

@@ -62,7 +62,9 @@ privileged field from them:
 
 Only the params map itself counts, or a map inside it, as `params["user"]` is. A map the code builds, as
 `%{user_id: user.id, note: params["note"]}`, holds the keys the code chose. Keys the code puts, merges in or drops on
-the way, as `Map.put(params, "user_id", user.id)` and `Map.drop(params, ["approved"])` do, are the code's too.
+the way, as `Map.put(params, "user_id", user.id)` and `Map.drop(params, ["approved"])` do, are the code's too. And
+the changeset must be saved: a changeset built only to show a form's errors, as a `"validate"` event's is, sets
+nothing.
 
 A change a policy checks passes, as `ArchTest.Effects.writes_are_authorized/2` reads one: the endpoint, its
 controller's plugs, its router pipelines or its `live_session` hooks call a module given as `policy:`. So does a
@@ -133,7 +135,8 @@ end
 ```
 
 `no_unbounded_queries/2` flags an endpoint that reaches, directly or through what it calls, a repo's `all/1,2` given
-a schema, or a query with no `where`, `limit` or aggregate, such as `count(p.id)`. Endpoints are controller actions,
+a schema, or a query with no `where`, `limit` or aggregate, such as `count(p.id)`, and no join on a pinned value, as
+`join: m in assoc(p, :memberships), on: m.project_id == ^project.id` is, which filters as a `where` does. Endpoints are controller actions,
 a LiveView's `mount/3`, `handle_params/3` and `handle_event/3`, a LiveComponent's `handle_event/3`, and a channel's
 `join/3` and `handle_in/3`. A query a function is given, or one another function builds, isn't known, so it isn't
 counted.

@@ -79,6 +79,8 @@ defmodule ArchTest.Code.Effects do
   # Seeds that are only some of a library's functions: the rest build values, as `Req.new/1` does.
   @function_seeds %{
     Ecto.Repo.Queryable => %{delete_all: :db_write, update_all: :db_write},
+    # `in_transaction?/1` asks the process, not the database.
+    Ecto.Repo.Transaction => {~w(transaction transact rollback)a, :db_write},
     Req =>
       {~w(request request! get get! post post! put put! patch patch! delete delete! head head! run run!)a,
        :http},
@@ -136,6 +138,13 @@ defmodule ArchTest.Code.Effects do
       link: :process,
       unlink: :process,
       put: :process,
+      # What Process.send_after/3 compiles to, and timers, which schedule work for the process.
+      send_after: :process,
+      start_timer: :process,
+      # Registrations that make the runtime send the process events.
+      system_monitor: :process,
+      trace: :process,
+      monitor_node: :process,
       system_time: :clock,
       monotonic_time: :clock,
       timestamp: :clock,
@@ -143,6 +152,7 @@ defmodule ArchTest.Code.Effects do
       universaltime: :clock,
       localtime: :clock
     },
+    :net_kernel => %{monitor_nodes: :process},
     GenServer => {~w(call cast multi_call abcast start start_link stop reply)a, :process},
     Supervisor =>
       {~w(start_link start_child terminate_child restart_child delete_child)a, :process},

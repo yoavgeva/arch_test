@@ -63,7 +63,9 @@ defmodule ArchTest.TestCode do
   }
   # Requests Phoenix's ConnTest, LiveViewTest and ChannelTest send through the endpoint or the socket, which reach
   # its controllers, live views and channels.
-  @requests ~w(get post put patch delete head options dispatch live live_isolated subscribe_and_join join push)a
+  # Phoenix's test requests, and PhoenixTest's `visit/2`.
+  @requests ~w(get post put patch delete head options dispatch live live_isolated subscribe_and_join join push visit)a
+  @starts ~w(start_supervised start_supervised! start_link_supervised!)a
   @web ~r/Web\.|(Controller|Live|LiveView|Component|Channel|Plug|Socket)$/
   @mock_fix "use the real module, and mock only the ones that touch the database, the network or other services"
 
@@ -126,11 +128,14 @@ defmodule ArchTest.TestCode do
   @spec tests_dont_mock_pure_modules(ModuleSet.t(), keyword()) :: :ok
   def tests_dont_mock_pure_modules(%ModuleSet{} = subject, opts \\ []) do
     {tests, code, effects, source} = analyze(subject, opts)
+    # Which functions call outside the code is the same for every mock, so it's found once.
+    opaque = if Enum.any?(tests, &(&1.mocks != [])), do: opaque(code), else: MapSet.new()
+    known = %{code: code, effects: effects, opaque: opaque}
 
     violations =
       for test <- tests,
           mock <- test.mocks,
-          message <- List.wrap(pure_mock(mock, code, effects, source)) do
+          message <- List.wrap(pure_mock(mock, known, source)) do
         violation(test, "tests_dont_mock_pure_modules", mock.line,
           message:
             "#{mock.label} mocks #{message}, so the test checks the mock instead of the code",
@@ -249,15 +254,57 @@ defmodule ArchTest.TestCode do
 
   defp uses?(test, target, mocked, graph, source) do
     own = own_modules(test, source)
+    names?(test, target, mocked, own) or runs?(test, target, graph, source, own)
+  end
 
+  # The test names the target: as a value, in a real call, as a module nested in it, through its web requests, or in
+  # a module of its own file.
+  defp names?(test, target, mocked, own) do
     target in test.references or real_call?(test, target, mocked) or nested?(test, target) or
       (Regex.match?(@web, inspect(target)) and requests?(test)) or
       Enum.any?(
         own,
         &(target in &1.references or Enum.any?(&1.calls, fn call -> calls?(call, target) end))
-      ) or
-      runs_task?(test, target) or
+      )
+  end
+
+  # The test runs the target's code: a Mix task by its name, one of its macros, a protocol implementation written in
+  # its file, or code that reaches it.
+  defp runs?(test, target, graph, source, own) do
+    runs_task?(test, target) or uses_macro?(test, target, graph) or
+      implemented_in?(test, target, graph) or
       exercised?(test, target, graph, source, own)
+  end
+
+  # A protocol the test calls, implemented in the target's file, as `defimpl Swoosh.Email.Recipient` inside a mailer.
+  defp implemented_in?(test, target, {code, _index}) do
+    file = Code.file(code, target)
+
+    protocols =
+      for %{target: {module, _, _}} when module != :local <- test.calls,
+          uniq: true,
+          do: "#{module}."
+
+    file != nil and protocols != [] and
+      Enum.any?(code.modules, fn {module, _info} ->
+        Map.has_key?(code.functions, {module, :__impl__, 1}) and
+          String.starts_with?(Atom.to_string(module), protocols) and
+          Code.file(code, module) == file
+      end)
+  end
+
+  # A macro the target defines, called without its module, as the `~GQL` sigil is once a case template imports it.
+  defp uses_macro?(test, target, {code, _index}) do
+    case code.modules do
+      %{^target => %{macros: macros}} ->
+        Enum.any?(test.calls, fn
+          %{target: {:local, name, arity}} -> MapSet.member?(macros, {name, arity})
+          _call -> false
+        end)
+
+      _modules ->
+        false
+    end
   end
 
   defp calls?(%{target: {module, _, _}}, target), do: module == target
@@ -297,13 +344,26 @@ defmodule ArchTest.TestCode do
 
     start =
       for %{target: {module, _, _} = key} <-
-            test.calls ++ helpers ++ Enum.flat_map(own, & &1.calls),
+            test.calls ++ helpers ++ Enum.flat_map(own, & &1.calls) ++ started(test, code),
           module != target,
           Map.has_key?(code.functions, key),
           uniq: true,
           do: {key, true}
 
     reach(start, MapSet.new(start, &elem(&1, 0)), target, graph)
+  end
+
+  # The init/1 of each process the test starts under its supervisor, as `start_supervised!({MyApp.Workers, opts})`
+  # runs MyApp.Workers' init/1, and with it the children it names.
+  defp started(test, code) do
+    if Enum.any?(test.calls, &match?(%{target: {:local, name, _}} when name in @starts, &1)),
+      do:
+        for(
+          module <- test.references,
+          Map.has_key?(code.functions, {module, :init, 1}),
+          do: %{target: {module, :init, 1}}
+        ),
+      else: []
   end
 
   # The modules a test calls, and those it imports a function it calls from, as `findings(text)` is from
@@ -330,8 +390,10 @@ defmodule ArchTest.TestCode do
   defp reach([{key, follow_names?} | rest], seen, target, {code, index} = graph) do
     info = code.functions[key]
 
-    # A behaviour is used through its implementations.
-    if MapSet.member?(info.references, target) or target in Code.behaviours(code, elem(key, 0)) do
+    # A behaviour is used through its implementations, and a protocol a test reaches through its implementation for
+    # the target, as Absinthe's parser builds structs whose code is their `Blueprint.Draft` implementation.
+    if MapSet.member?(info.references, target) or target in Code.behaviours(code, elem(key, 0)) or
+         implements?(elem(key, 0), target, code) do
       true
     else
       called =
@@ -346,6 +408,11 @@ defmodule ArchTest.TestCode do
       next = Enum.uniq_by(called ++ named, &elem(&1, 0))
       reach(next ++ rest, Enum.into(next, seen, &elem(&1, 0)), target, graph)
     end
+  end
+
+  defp implements?(module, target, code) do
+    Map.has_key?(code.functions, {module, :__protocol__, 1}) and
+      MapSet.member?(code.scope, Module.concat(module, target))
   end
 
   defp named_functions(info, index, seen) do
@@ -377,54 +444,57 @@ defmodule ArchTest.TestCode do
     do: Enum.any?(test.calls, &match?(%{target: {:local, name, _}} when name in @requests, &1))
 
   # What a mock replaces, when that touches nothing outside the code: a Mox mock's behaviour, or a project module.
-  defp pure_mock(%{module: module, function: function}, code, effects, source) do
+  defp pure_mock(%{module: module, function: function}, known, source) do
     case Map.fetch(source.mocks, module) do
-      {:ok, behaviours} -> pure_behaviours(module, behaviours, function, code, effects)
-      :error -> pure_module(module, function, code, effects)
+      {:ok, behaviours} -> pure_behaviours(module, behaviours, function, known)
+      :error -> pure_module(module, function, known)
     end
   end
 
-  defp pure_behaviours(mock, behaviours, function, code, effects) do
+  defp pure_behaviours(mock, behaviours, function, known) do
     implementations =
-      for {implementation, info} <- code.modules,
+      for {implementation, info} <- known.code.modules,
           Enum.any?(behaviours, &(&1 in info.behaviours)),
           do: implementation
 
-    if pure?(implementations, function, code, effects) do
+    if pure?(implementations, function, known) do
       "#{inspect(mock)}, whose #{Enum.map_join(behaviours, ", ", &inspect/1)} implementations touch nothing " <>
         "outside them"
     end
   end
 
-  defp pure_module(module, function, code, effects) do
-    if MapSet.member?(code.scope, module) and pure?([module], function, code, effects) do
+  defp pure_module(module, function, known) do
+    if MapSet.member?(known.code.scope, module) and pure?([module], function, known) do
       replaced = if function, do: "#{inspect(module)}.#{function}", else: inspect(module)
       "#{replaced}, which touches nothing outside it"
     end
   end
 
-  defp pure?(modules, function, code, effects) do
+  defp pure?(modules, function, known) do
     functions =
       for module <- modules,
-          {{^module, name, _arity} = key, info} <- Code.functions_of(code, module),
+          {{^module, name, _arity} = key, info} <- Code.functions_of(known.code, module),
           info.kind == :def and not info.injected and (function == nil or name == function),
           do: key
 
-    opaque = opaque(code)
-
     functions != [] and
-      Enum.all?(functions, &(Map.get(effects, &1, %{}) == %{} and not MapSet.member?(opaque, &1)))
+      Enum.all?(
+        functions,
+        &(Map.get(known.effects, &1, %{}) == %{} and not MapSet.member?(known.opaque, &1))
+      )
   end
 
   # The functions whose effects the code can't show: they call a library outside Elixir's and Erlang's own, as an
   # SDK such as `Shopify` is, or a module chosen at runtime, directly or through the project functions they call.
   defp opaque(code) do
+    roots = standard_roots()
+
     standard =
       Map.new(
         for {_key, info} <- code.functions,
             %{target: {module, _, _}} <- info.calls,
             uniq: true,
-            do: {module, standard?(module, code)}
+            do: {module, standard?(module, code, roots)}
       )
 
     direct =
@@ -436,26 +506,33 @@ defmodule ArchTest.TestCode do
           into: MapSet.new(),
           do: key
 
-    spread_to_callers(direct, code.functions)
+    callers =
+      for {caller, %{calls: calls}} <- code.functions, %{target: target} <- calls, reduce: %{} do
+        acc -> Map.update(acc, target, [caller], &[caller | &1])
+      end
+
+    to_callers(MapSet.to_list(direct), direct, callers)
   end
 
-  defp spread_to_callers(set, functions) do
-    next =
-      for {key, %{calls: calls}} <- functions,
-          not MapSet.member?(set, key),
-          Enum.any?(calls, &MapSet.member?(set, &1.target)),
-          into: set,
-          do: key
+  # Spreads a set of functions to everything that calls one, breadth-first through the callers.
+  defp to_callers([], found, _callers), do: found
 
-    if MapSet.size(next) == MapSet.size(set), do: set, else: spread_to_callers(next, functions)
+  defp to_callers([key | rest], found, callers) do
+    next =
+      for caller <- Map.get(callers, key, []),
+          not MapSet.member?(found, caller),
+          uniq: true,
+          do: caller
+
+    to_callers(next ++ rest, Enum.into(next, found), callers)
   end
 
   # A project module, or one of Elixir's or Erlang's own, whose effects are known.
-  defp standard?(module, code) do
+  defp standard?(module, code, roots) do
     MapSet.member?(code.scope, module) or
       case :code.which(module) do
         :preloaded -> true
-        path when is_list(path) -> String.starts_with?(List.to_string(path), standard_roots())
+        path when is_list(path) -> String.starts_with?(List.to_string(path), roots)
         _missing -> false
       end
   end

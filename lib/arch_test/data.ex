@@ -66,6 +66,10 @@ defmodule ArchTest.Data do
   themselves an admin, or move a record to another account. Passing the current user doesn't help: the user is
   changing their own record.
 
+  The changeset must be saved: a function on the way to the cast writes to the database, or the endpoint does when it
+  casts itself or calls the changeset function directly. A changeset built only to show a form's errors, as a
+  "validate" event's is, sets nothing.
+
   An endpoint that a policy checks, as `writes_are_authorized/2` reads one, passes: an admin may set roles. So does
   a change made in a function given to a helper that checks the user first, as
   `with_admin(conn, fn -> Accounts.set_role(user, params) end)` does. Only the params map itself counts, or a map
@@ -79,7 +83,7 @@ defmodule ArchTest.Data do
   @spec no_mass_assignment(ModuleSet.t(), keyword()) :: :ok
   def no_mass_assignment(%ModuleSet{} = subject, opts \\ []) do
     {configured, policies} = Authorization.policies(opts)
-    {modules, code, _effects} = Rules.analyze(subject, opts)
+    {modules, code, effects} = Rules.analyze(subject, opts)
     routes = Authorization.routes(code, opts)
 
     # Only the request's map itself carries keys the client chose, less those the code sets on the way.
@@ -107,6 +111,7 @@ defmodule ArchTest.Data do
                 search
               )
             ),
+          saves?(endpoint, path, effects),
           not Authorization.checked?(code, routes, endpoint, policies) do
         through =
           if path == [],
@@ -209,8 +214,8 @@ defmodule ArchTest.Data do
 
   Endpoints are controller actions, a LiveView's `mount/3`, `handle_params/3` and `handle_event/3`, a
   LiveComponent's `handle_event/3` and a channel's `join/3` and `handle_in/3`. One is flagged when it reaches,
-  directly or through what it calls, a repo's `all/1,2` given a schema, or a query with no `where`, `limit` or
-  aggregate, as `Repo.all(Post)` and `Post |> order_by(:title) |> Repo.all()` are. Each request then loads more as
+  directly or through what it calls, a repo's `all/1,2` given a schema, or a query with no `where`, `limit`,
+  aggregate or join on a pinned value, as `Repo.all(Post)` and `Post |> order_by(:title) |> Repo.all()` are. Each request then loads more as
   the table grows, until pages time out. Paginate the query, or filter it to what the page shows. A query a function
   is given, or one built elsewhere, isn't known, so it isn't counted.
   """
@@ -242,6 +247,15 @@ defmodule ArchTest.Data do
   @spec fetch?(Code.key()) :: boolean()
   def fetch?({Ecto.Repo.Queryable, name, _arity}), do: name in @fetches
   def fetch?(_target), do: false
+
+  # Whether the changeset is saved: a function on the way to the cast writes to the database, or, when the endpoint
+  # casts itself or calls the function that does, the endpoint writes. A changeset built only to show a form's errors,
+  # as a "validate" event's is, sets nothing.
+  defp saves?(endpoint, path, effects) do
+    writes? = &Map.has_key?(Map.get(effects, &1, %{}), :db_write)
+    reached = Enum.map(path, & &1.target)
+    Enum.any?(reached, writes?) or (length(reached) <= 1 and writes?.(endpoint))
+  end
 
   # A cast/3 that takes privileged fields from the map flowing in, but for those the code set on it: the function
   # holding it is where the path ends.

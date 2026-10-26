@@ -193,8 +193,8 @@ defmodule ArchTest.Processes do
     `Task.async_stream(items, fun, timeout: :infinity)` or `Req.get(url, receive_timeout: :infinity)`;
   - calls that wait with no limit unless given one: `:gen_tcp.connect/3`, `:gen_tcp.recv/2`, `:gen_udp.recv/2`,
     `:ssl.connect/2`, `:ssl.recv/2`, `:ssl.handshake/1`, and `:httpc.request/1,2,4` without a `timeout` HTTP option;
-  - a `receive` with no `after`, or `after :infinity`. A process's own loop, whose clauses call the function again
-    to wait for its next message, passes.
+  - a `receive` with no `after`, or `after :infinity`. A process's own loop, which calls the function again, from
+    the receive's clauses or after it, to wait for its next message, passes.
 
   `GenServer.call/2`, `Task.await/1`, Req, Finch and HTTPoison have default timeouts, and pass.
   """
@@ -225,9 +225,12 @@ defmodule ArchTest.Processes do
     Rules.report(violations, "no_unbounded_waits")
   end
 
-  # Whether a receive's clauses lead back to its function, through the module's functions: a process's loop.
+  # Whether a receive's clauses lead back to its function, through the module's functions, or the function calls
+  # itself after the receive: a process's loop.
   defp loops?(%{how: :receive, next: next}, key, code),
-    do: leads_to?(next, MapSet.new(next), key, code)
+    do:
+      leads_to?(next, MapSet.new(next), key, code) or
+        Enum.any?(code.functions[key].calls, &(&1.target == key))
 
   defp loops?(_wait, _key, _code), do: false
 

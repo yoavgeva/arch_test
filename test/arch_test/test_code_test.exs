@@ -138,6 +138,34 @@ defmodule ArchTest.TestCodeTest do
          def get(request), do: TestFixture.HttpAdapter.fetch(request)
        end
 
+       defmodule TestFixture.Sigils do
+         defmacro sigil_Q(text, _modifiers), do: text
+       end
+
+       defmodule TestFixture.Normalize do
+         def run(input, _opts), do: {:ok, String.trim(input)}
+       end
+
+       defprotocol TestFixture.Renderable do
+         def render(item)
+       end
+
+       defmodule TestFixture.Badge do
+         defstruct label: "badge"
+
+         defimpl TestFixture.Renderable do
+           def render(badge), do: badge.label
+         end
+       end
+
+       defmodule TestFixture.Parser do
+         def parse(name), do: struct(Module.concat([TestFixture, Macro.camelize(name)]), %{})
+       end
+
+       defmodule TestFixture.Page do
+         def render(item), do: TestFixture.Renderable.render(item)
+       end
+
        defmodule TestFixture.Paying do
          def pay(code), do: TestFixture.Promotions.discount(code)
        end
@@ -152,6 +180,45 @@ defmodule ArchTest.TestCodeTest do
        """
        defmodule TestFixtureWeb.PageController do
          def show(conn, _params), do: conn
+       end
+
+       defmodule TestFixtureWeb.Live.Archives do
+         def mount(_params, _session, socket), do: {:ok, socket}
+       end
+       """},
+      {"lib/test_fixture/mailer.ex",
+       """
+       defprotocol MailLib.Recipient do
+         def format(recipient)
+       end
+
+       defmodule TestFixture.Account do
+         defstruct [:email]
+       end
+
+       defmodule TestFixture.Mailer do
+         def deliver(email), do: {:ok, email}
+
+         defimpl MailLib.Recipient, for: TestFixture.Account do
+           def format(account), do: {"", account.email}
+         end
+       end
+       """},
+      {"lib/test_fixture/workers.ex",
+       """
+       defmodule TestFixture.Broadcaster do
+         use GenServer
+
+         def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+         def init(opts), do: {:ok, opts}
+       end
+
+       defmodule TestFixture.Workers do
+         use Supervisor
+
+         def start_link(opts), do: Supervisor.start_link(__MODULE__, opts)
+         def init(opts), do: Supervisor.init([{TestFixture.Broadcaster, opts}], strategy: :one_for_one)
+         def topic(name), do: "workers:\#{name}"
        end
        """}
     ])
@@ -405,6 +472,85 @@ defmodule ArchTest.TestCodeTest do
 
       test "fetches through the adapter" do
         assert TestFixture.Fetcher.get(1) == 1
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/sigils_test.exs", """
+    defmodule TestFixture.SigilsTest do
+      use TestFixture.SigilCase
+
+      test "quotes" do
+        assert ~Q"text" == "text"
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/normalize_test.exs", """
+    defmodule TestFixture.NormalizeTest do
+      use TestFixture.PhaseCase, phase: TestFixture.Normalize
+
+      test "trims" do
+        assert run_phase(" a ") == {:ok, "a"}
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/mailer_test.exs", """
+    defmodule TestFixture.MailerTest do
+      use ExUnit.Case, async: true
+
+      test "formats an account as a recipient" do
+        assert MailLib.Recipient.format(%TestFixture.Account{email: "a@b.c"}) == {"", "a@b.c"}
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/broadcaster_test.exs", """
+    defmodule TestFixture.BroadcasterTest do
+      use ExUnit.Case, async: true
+
+      test "forwards what it hears" do
+        start_supervised!({TestFixture.Workers, name: :workers})
+        assert TestFixture.Workers.topic(:workers) == "workers:workers"
+      end
+    end
+    """)
+
+    write_test("test/test_fixture_web/live/archives_test.exs", """
+    defmodule TestFixtureWeb.Live.ArchivesTest do
+      use TestFixtureWeb.ConnCase, async: true
+
+      test "lists archives", %{conn: conn} do
+        conn |> visit("/archives") |> assert_has("h1", text: "Archives")
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/badge_test.exs", """
+    defmodule TestFixture.BadgeTest do
+      use ExUnit.Case, async: true
+
+      test "renders a parsed badge" do
+        assert TestFixture.Page.render(TestFixture.Parser.parse("badge")) == "badge"
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/router_test.exs", """
+    defmodule TestFixture.RouterTest do
+      use ExUnit.Case, async: true
+
+      defmodule Plug do
+        def unquote(:*)(conn), do: conn
+
+        for verb <- [:get, :post] do
+          def unquote(verb)(conn), do: conn
+        end
+      end
+
+      test "routes every verb" do
+        assert Plug.*(1) == 1
       end
     end
     """)

@@ -50,6 +50,22 @@ defmodule ArchTest.GuardrailsTest do
            """
            defmodule GuardFixture.Validator do
              @callback validate(term()) :: :ok
+             @callback check_connection(term()) :: :ok | {:error, term()}
+             @callback describe(term()) :: String.t()
+           end
+
+           defmodule GuardFixture.SyslogValidator do
+             @behaviour GuardFixture.Validator
+
+             @impl true
+             def validate(_response), do: :ok
+
+             # A behaviour's answer that this implementation can't do it.
+             @impl true
+             def check_connection(_config), do: {:error, :not_implemented}
+
+             @impl true
+             def describe(_config), do: raise("not implemented yet")
            end
 
            defmodule GuardFixture.Response do
@@ -428,12 +444,16 @@ defmodule ArchTest.GuardrailsTest do
   end
 
   describe "no_stubs/2" do
-    test "flags functions that only raise 'not implemented' or return it" do
+    test "flags functions that only raise 'not implemented' or return it, and passes callbacks that return it" do
       violations = capture(&Guardrails.no_stubs/2)
 
-      assert Enum.map(violations, &{&1.caller_function, &1.line, &1.message}) == [
-               {{:refund, 1}, 18, ~s(is a stub: it only raises "not implemented yet")},
-               {{:export, 1}, 20, "is a stub: it only returns {:error, :not_implemented}"}
+      assert Enum.map(violations, &{&1.module, &1.caller_function, &1.line, &1.message}) == [
+               {GuardFixture.Pricing, {:refund, 1}, 18,
+                ~s(is a stub: it only raises "not implemented yet")},
+               {GuardFixture.Pricing, {:export, 1}, 20,
+                "is a stub: it only returns {:error, :not_implemented}"},
+               {GuardFixture.SyslogValidator, {:describe, 1}, 18,
+                ~s(is a stub: it only raises "not implemented yet")}
              ]
 
       assert hd(violations).fix == "implement it, or remove it until something needs it"
