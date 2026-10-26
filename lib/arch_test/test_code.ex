@@ -63,7 +63,9 @@ defmodule ArchTest.TestCode do
   }
   # Requests Phoenix's ConnTest, LiveViewTest and ChannelTest send through the endpoint or the socket, which reach
   # its controllers, live views and channels.
-  @requests ~w(get post put patch delete head options dispatch live live_isolated subscribe_and_join join push)a
+  # Phoenix's test requests, and PhoenixTest's `visit/2`.
+  @requests ~w(get post put patch delete head options dispatch live live_isolated subscribe_and_join join push visit)a
+  @starts ~w(start_supervised start_supervised! start_link_supervised!)a
   @web ~r/Web\.|(Controller|Live|LiveView|Component|Channel|Plug|Socket)$/
   @mock_fix "use the real module, and mock only the ones that touch the database, the network or other services"
 
@@ -266,10 +268,29 @@ defmodule ArchTest.TestCode do
       )
   end
 
-  # The test runs the target's code: a Mix task by its name, one of its macros, or code that reaches it.
+  # The test runs the target's code: a Mix task by its name, one of its macros, a protocol implementation written in
+  # its file, or code that reaches it.
   defp runs?(test, target, graph, source, own) do
     runs_task?(test, target) or uses_macro?(test, target, graph) or
+      implemented_in?(test, target, graph) or
       exercised?(test, target, graph, source, own)
+  end
+
+  # A protocol the test calls, implemented in the target's file, as `defimpl Swoosh.Email.Recipient` inside a mailer.
+  defp implemented_in?(test, target, {code, _index}) do
+    file = Code.file(code, target)
+
+    protocols =
+      for %{target: {module, _, _}} when module != :local <- test.calls,
+          uniq: true,
+          do: "#{module}."
+
+    file != nil and protocols != [] and
+      Enum.any?(code.modules, fn {module, _info} ->
+        Map.has_key?(code.functions, {module, :__impl__, 1}) and
+          String.starts_with?(Atom.to_string(module), protocols) and
+          Code.file(code, module) == file
+      end)
   end
 
   # A macro the target defines, called without its module, as the `~GQL` sigil is once a case template imports it.
@@ -323,13 +344,26 @@ defmodule ArchTest.TestCode do
 
     start =
       for %{target: {module, _, _} = key} <-
-            test.calls ++ helpers ++ Enum.flat_map(own, & &1.calls),
+            test.calls ++ helpers ++ Enum.flat_map(own, & &1.calls) ++ started(test, code),
           module != target,
           Map.has_key?(code.functions, key),
           uniq: true,
           do: {key, true}
 
     reach(start, MapSet.new(start, &elem(&1, 0)), target, graph)
+  end
+
+  # The init/1 of each process the test starts under its supervisor, as `start_supervised!({MyApp.Workers, opts})`
+  # runs MyApp.Workers' init/1, and with it the children it names.
+  defp started(test, code) do
+    if Enum.any?(test.calls, &match?(%{target: {:local, name, _}} when name in @starts, &1)),
+      do:
+        for(
+          module <- test.references,
+          Map.has_key?(code.functions, {module, :init, 1}),
+          do: %{target: {module, :init, 1}}
+        ),
+      else: []
   end
 
   # The modules a test calls, and those it imports a function it calls from, as `findings(text)` is from
