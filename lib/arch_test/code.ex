@@ -6,7 +6,7 @@ defmodule ArchTest.Code do
   # `MyApp.Repo.get!/2`. Reading starts at the modules a rule checks and follows their calls into the other
   # modules in scope, so a rule reads only the code it can reach.
 
-  alias ArchTest.Code.{Actors, Errors, Signatures, Waits, Walker}
+  alias ArchTest.Code.{Actors, Data, Errors, Signatures, Waits, Walker}
   alias ArchTest.Collector
 
   defstruct modules: %{}, functions: %{}, scope: MapSet.new()
@@ -43,6 +43,10 @@ defmodule ArchTest.Code do
           dynamic: boolean(),
           actors: Actors.calls(),
           waits: [Waits.wait()],
+          casts: [Data.cast()],
+          whole_tables: [Data.table()],
+          derived: [Data.derived()],
+          locks: boolean(),
           signature: Signatures.t()
         }
   @type module_info :: %{
@@ -52,7 +56,9 @@ defmodule ArchTest.Code do
           hidden: MapSet.t({atom(), arity()}),
           callbacks: MapSet.t({atom(), arity()}),
           routes: [route()],
-          component_values: MapSet.t(String.t())
+          component_values: MapSet.t(String.t()),
+          fields: %{atom() => term()},
+          float_defaults: [atom()]
         }
   @type route :: %{
           controller: module(),
@@ -143,7 +149,9 @@ defmodule ArchTest.Code do
               :hidden,
               :callbacks,
               :routes,
-              :component_values
+              :component_values,
+              :fields,
+              :float_defaults
             ])
           ),
         functions: Map.merge(code.functions, read.functions)
@@ -218,7 +226,9 @@ defmodule ArchTest.Code do
          callbacks: callbacks_in(binary),
          functions: functions(module, info.definitions, booleans_in(binary)),
          routes: routes_in(info.definitions),
-         component_values: component_values_in(info.definitions)
+         component_values: component_values_in(info.definitions),
+         fields: Data.fields(info.definitions),
+         float_defaults: Data.float_defaults(info.definitions)
        }}
     else
       _ -> :error
@@ -391,6 +401,10 @@ defmodule ArchTest.Code do
          dynamic: Errors.dynamic?(clauses),
          actors: Actors.calls(clauses, module, locals),
          waits: Waits.unbounded(clauses, module, name, arity, locals),
+         casts: Data.casts(clauses),
+         whole_tables: Data.whole_tables(clauses),
+         derived: Data.derived(clauses),
+         locks: Data.locks?(clauses),
          signature:
            Signatures.of(
              clauses,

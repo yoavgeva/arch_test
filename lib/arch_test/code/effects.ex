@@ -226,6 +226,36 @@ defmodule ArchTest.Code.Effects do
   end
 
   @doc false
+  # Every function that `found?` holds for, or that calls one through project functions, with the shortest path
+  # there: the calls that lead to it, empty for the function itself.
+  @spec paths(Code.t(), (Code.key(), Code.function_info() -> boolean())) :: %{
+          Code.key() => [step()]
+        }
+  def paths(%Code{functions: functions}, found?) do
+    keys = functions |> Map.keys() |> Enum.sort()
+    start = Enum.filter(keys, &found?.(&1, functions[&1]))
+    found = Map.new(start, &{&1, %{found: []}})
+
+    start
+    |> spread(:found, callers(keys, functions), found)
+    |> Map.new(fn {key, %{found: path}} -> {key, path} end)
+  end
+
+  @doc false
+  # The first of `calls`, by line, to a function in `paths`, with the path from that call to what it leads to.
+  @spec first_path([Code.call()], %{Code.key() => [step()]}) :: {Code.call(), [step()]} | nil
+  def first_path(calls, paths) do
+    calls
+    |> Enum.sort_by(& &1.line)
+    |> Enum.find_value(fn call ->
+      case Map.fetch(paths, call.target) do
+        {:ok, path} -> {call, [step(call) | path]}
+        :error -> nil
+      end
+    end)
+  end
+
+  @doc false
   # The function a path is reported as reaching: its seed, or, when the seed is the inside of a library that projects
   # reach through a module of their own, such as an Ecto repo, the first of that module's functions on the path.
   @spec reached([step()]) :: Code.key()
