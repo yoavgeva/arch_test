@@ -126,11 +126,14 @@ defmodule ArchTest.TestCode do
   @spec tests_dont_mock_pure_modules(ModuleSet.t(), keyword()) :: :ok
   def tests_dont_mock_pure_modules(%ModuleSet{} = subject, opts \\ []) do
     {tests, code, effects, source} = analyze(subject, opts)
+    # Which functions call outside the code is the same for every mock, so it's found once.
+    opaque = if Enum.any?(tests, &(&1.mocks != [])), do: opaque(code), else: MapSet.new()
+    known = %{code: code, effects: effects, opaque: opaque}
 
     violations =
       for test <- tests,
           mock <- test.mocks,
-          message <- List.wrap(pure_mock(mock, code, effects, source)) do
+          message <- List.wrap(pure_mock(mock, known, source)) do
         violation(test, "tests_dont_mock_pure_modules", mock.line,
           message:
             "#{mock.label} mocks #{message}, so the test checks the mock instead of the code",
@@ -377,54 +380,57 @@ defmodule ArchTest.TestCode do
     do: Enum.any?(test.calls, &match?(%{target: {:local, name, _}} when name in @requests, &1))
 
   # What a mock replaces, when that touches nothing outside the code: a Mox mock's behaviour, or a project module.
-  defp pure_mock(%{module: module, function: function}, code, effects, source) do
+  defp pure_mock(%{module: module, function: function}, known, source) do
     case Map.fetch(source.mocks, module) do
-      {:ok, behaviours} -> pure_behaviours(module, behaviours, function, code, effects)
-      :error -> pure_module(module, function, code, effects)
+      {:ok, behaviours} -> pure_behaviours(module, behaviours, function, known)
+      :error -> pure_module(module, function, known)
     end
   end
 
-  defp pure_behaviours(mock, behaviours, function, code, effects) do
+  defp pure_behaviours(mock, behaviours, function, known) do
     implementations =
-      for {implementation, info} <- code.modules,
+      for {implementation, info} <- known.code.modules,
           Enum.any?(behaviours, &(&1 in info.behaviours)),
           do: implementation
 
-    if pure?(implementations, function, code, effects) do
+    if pure?(implementations, function, known) do
       "#{inspect(mock)}, whose #{Enum.map_join(behaviours, ", ", &inspect/1)} implementations touch nothing " <>
         "outside them"
     end
   end
 
-  defp pure_module(module, function, code, effects) do
-    if MapSet.member?(code.scope, module) and pure?([module], function, code, effects) do
+  defp pure_module(module, function, known) do
+    if MapSet.member?(known.code.scope, module) and pure?([module], function, known) do
       replaced = if function, do: "#{inspect(module)}.#{function}", else: inspect(module)
       "#{replaced}, which touches nothing outside it"
     end
   end
 
-  defp pure?(modules, function, code, effects) do
+  defp pure?(modules, function, known) do
     functions =
       for module <- modules,
-          {{^module, name, _arity} = key, info} <- Code.functions_of(code, module),
+          {{^module, name, _arity} = key, info} <- Code.functions_of(known.code, module),
           info.kind == :def and not info.injected and (function == nil or name == function),
           do: key
 
-    opaque = opaque(code)
-
     functions != [] and
-      Enum.all?(functions, &(Map.get(effects, &1, %{}) == %{} and not MapSet.member?(opaque, &1)))
+      Enum.all?(
+        functions,
+        &(Map.get(known.effects, &1, %{}) == %{} and not MapSet.member?(known.opaque, &1))
+      )
   end
 
   # The functions whose effects the code can't show: they call a library outside Elixir's and Erlang's own, as an
   # SDK such as `Shopify` is, or a module chosen at runtime, directly or through the project functions they call.
   defp opaque(code) do
+    roots = standard_roots()
+
     standard =
       Map.new(
         for {_key, info} <- code.functions,
             %{target: {module, _, _}} <- info.calls,
             uniq: true,
-            do: {module, standard?(module, code)}
+            do: {module, standard?(module, code, roots)}
       )
 
     direct =
@@ -436,26 +442,33 @@ defmodule ArchTest.TestCode do
           into: MapSet.new(),
           do: key
 
-    spread_to_callers(direct, code.functions)
+    callers =
+      for {caller, %{calls: calls}} <- code.functions, %{target: target} <- calls, reduce: %{} do
+        acc -> Map.update(acc, target, [caller], &[caller | &1])
+      end
+
+    to_callers(MapSet.to_list(direct), direct, callers)
   end
 
-  defp spread_to_callers(set, functions) do
-    next =
-      for {key, %{calls: calls}} <- functions,
-          not MapSet.member?(set, key),
-          Enum.any?(calls, &MapSet.member?(set, &1.target)),
-          into: set,
-          do: key
+  # Spreads a set of functions to everything that calls one, breadth-first through the callers.
+  defp to_callers([], found, _callers), do: found
 
-    if MapSet.size(next) == MapSet.size(set), do: set, else: spread_to_callers(next, functions)
+  defp to_callers([key | rest], found, callers) do
+    next =
+      for caller <- Map.get(callers, key, []),
+          not MapSet.member?(found, caller),
+          uniq: true,
+          do: caller
+
+    to_callers(next ++ rest, Enum.into(next, found), callers)
   end
 
   # A project module, or one of Elixir's or Erlang's own, whose effects are known.
-  defp standard?(module, code) do
+  defp standard?(module, code, roots) do
     MapSet.member?(code.scope, module) or
       case :code.which(module) do
         :preloaded -> true
-        path when is_list(path) -> String.starts_with?(List.to_string(path), standard_roots())
+        path when is_list(path) -> String.starts_with?(List.to_string(path), roots)
         _missing -> false
       end
   end
