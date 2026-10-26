@@ -50,6 +50,18 @@ defmodule ArchTest.Code do
   end
 
   @doc false
+  # Reads every module in scope: the `:paths`, `:apps` or `:app` in `opts`, or else the Mix project running the
+  # tests.
+  @spec load_scope(keyword()) :: t()
+  def load_scope(opts) do
+    opts = with_project_app(opts)
+    beams = beams_in_scope([], opts)
+    modules = beams |> Map.keys() |> Enum.sort()
+
+    reach(modules, beams, %__MODULE__{scope: MapSet.new(modules)})
+  end
+
+  @doc false
   # The module's functions, sorted, as `{key, function_info}` pairs.
   @spec functions_of(t(), module()) :: [{key(), function_info()}]
   def functions_of(%__MODULE__{functions: functions}, module) do
@@ -95,6 +107,19 @@ defmodule ArchTest.Code do
       | modules: Map.put(code.modules, module, Map.take(read, [:file, :behaviours])),
         functions: Map.merge(code.functions, read.functions)
     }
+  end
+
+  defp with_project_app(opts) do
+    scoped? =
+      Keyword.has_key?(opts, :paths) or Keyword.has_key?(opts, :apps) or
+        Keyword.get(opts, :app, :all) != :all
+
+    # Called through a variable, since only projects that `mix test` runs have a Mix project.
+    mix_project = Mix.Project
+
+    if scoped? or not Code.ensure_loaded?(mix_project),
+      do: opts,
+      else: Keyword.put(opts, :app, mix_project.config()[:app])
   end
 
   defp beams_in_scope(modules, opts) do

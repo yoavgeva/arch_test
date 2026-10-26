@@ -1,0 +1,98 @@
+# Test Code
+
+`ArchTest.TestCode` checks your tests against your code. ExUnit compiles test files in memory as it runs them, so
+nothing on disk holds their compiled code: these rules read the `*_test.exs` files under `:test_paths` (default
+`["test"]`) from source, with aliases resolved, and check them against the production code, read from debug info as
+`ArchTest.Effects` does.
+
+```elixir
+defmodule MyApp.TestRulesTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.TestCode
+
+  test "tests use their subject" do
+    tests_use_their_subject(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "tests mock only I/O" do
+    tests_dont_mock_pure_modules(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "tests don't sleep" do
+    tests_dont_sleep(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "async tests share no state" do
+    async_tests_share_no_state(modules_matching("MyApp.**"), app: :my_app)
+  end
+end
+```
+
+The subject selects test modules by name: `modules_matching("MyApp.**")` checks `MyApp.AccountsTest`.
+
+---
+
+## 1. Tests use their subject
+
+A test named after a module that never uses it, or only mocks it, checks nothing about it.
+
+```elixir
+# flagged: Pricing is only ever the stub
+test "totals" do
+  stub(MyApp.Pricing, :total, fn _ -> 10 end)
+  assert MyApp.Pricing.total([1, 2]) == 10
+end
+```
+
+`tests_use_their_subject/2` counts as a use:
+
+- the module's name anywhere in the test, other than as the module a mock replaces;
+- a call to one of its functions the test doesn't mock;
+- a use of a module nested in it, as `MyApp.Billing.Invoice` is in `MyApp.Billing`;
+- for controllers, live views and channels, requests through `Phoenix.ConnTest` (`get/2`, `post/3`...),
+  `Phoenix.LiveViewTest` (`live/2`) and `Phoenix.ChannelTest` (`subscribe_and_join/3`).
+
+Tests named after no module in scope are skipped.
+
+---
+
+## 2. Mock only I/O
+
+A mock of code that touches nothing outside it replaces what's cheap and safe to run, and the test then checks the
+mock. `tests_dont_mock_pure_modules/2` flags:
+
+- `Mimic.stub/3`, `Mimic.expect/3`, `Mock.with_mock/3` and the like on a project function that touches nothing
+  outside the code, directly or through what it calls;
+- an `expect/3` on a Mox mock whose behaviour's implementations all touch nothing outside the code. Mox mocks are
+  matched to their behaviours through the `Mox.defmock/2` calls in your test paths.
+
+Mocks of code that reads the database, makes HTTP requests or uses the network pass.
+
+---
+
+## 3. No sleeping
+
+A sleep long enough on a fast machine is too short on a slow one, and slows every run. `tests_dont_sleep/2` flags
+`Process.sleep/1` and `:timer.sleep/1` in tests, setups and test helpers.
+
+```elixir
+# flagged
+send(server, :refresh)
+Process.sleep(100)
+assert Cache.get(:key) == :fresh
+
+# fixed: wait for the message that says it's done
+send(server, {:refresh, self()})
+assert_receive :refreshed
+assert Cache.get(:key) == :fresh
+```
+
+---
+
+## 4. Async tests share no state
+
+`Application.put_env/3`, `System.put_env/2`, `:persistent_term.put/2`, `Logger.configure/1` and the like change
+state every test sees. In a module with `async: true`, the tests running at the same time pass or fail by timing.
+`async_tests_share_no_state/2` flags them in async test modules; pass the value to the code under test instead, or
+make the module `async: false`.

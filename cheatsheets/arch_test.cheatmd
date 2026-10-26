@@ -257,6 +257,25 @@ processes_hold_state(modules_matching("MyApp.**"), app: :my_app)
 processes_are_supervised(modules_matching("MyApp.**"), app: :my_app)
 ```
 
+## Test Code
+
+```elixir
+use ArchTest, app: :my_app
+use ArchTest.TestCode
+
+# MyApp.AccountsTest uses MyApp.Accounts, not only mocks of it
+tests_use_their_subject(modules_matching("MyApp.**"), app: :my_app)
+
+# mocks replace only code that does I/O
+tests_dont_mock_pure_modules(modules_matching("MyApp.**"), app: :my_app)
+
+# no Process.sleep/1 in tests
+tests_dont_sleep(modules_matching("MyApp.**"), app: :my_app)
+
+# no Application.put_env/3 and the like in async tests
+async_tests_share_no_state(modules_matching("MyApp.**"), app: :my_app)
+```
+
 ## Coupling Metrics
 
 ```elixir

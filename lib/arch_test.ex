@@ -38,6 +38,7 @@ defmodule ArchTest do
   - `ArchTest.Conventions` — pre-built Elixir convention rules
   - `ArchTest.Effects` — N+1 queries, pure functional cores and GenServer init, through every call
   - `ArchTest.Processes` — one interface per process, GenServers with a reason to exist, supervision
+  - `ArchTest.TestCode` — tests that use their subject, mock only I/O, don't sleep, and stay isolated
   - `ArchTest.Collector` — BEAM dependency graph builder
   - `ArchTest.Pattern` — glob pattern matching
   """

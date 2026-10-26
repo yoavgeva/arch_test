@@ -28,7 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     process"), passing ones that own a resource they start or clean up.
   - `processes_are_supervised/2` flags `spawn/1`, `Task.start/1`,
     `GenServer.start/2` and `Agent.start/1` ("unsupervised processes").
-- The effects and processes guides.
+- `ArchTest.TestCode`, which reads `*_test.exs` files from source and checks
+  them against the compiled code:
+  - `tests_use_their_subject/2` flags a test that never uses the module it's
+    named after, or only mocks it.
+  - `tests_dont_mock_pure_modules/2` flags Mimic, Mock and Mox mocks of code
+    that touches nothing outside it.
+  - `tests_dont_sleep/2` flags `Process.sleep/1` and `:timer.sleep/1`.
+  - `async_tests_share_no_state/2` flags global state changed in async tests.
+- The effects, processes and test code guides.
 
 ## [0.3.1] - 2026-05-21
 

@@ -24,6 +24,7 @@ Architecture rules as tests. Enforced from bytecode.
 | `ArchTest.Conventions` | Ban `IO.puts`, `dbg`, bare `raise`, and more |
 | `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1` |
 | `ArchTest.Processes` | One interface per process, GenServers with a reason to exist, supervised processes |
+| `ArchTest.TestCode` | Tests that use their subject, mock only I/O, don't sleep, and keep async tests isolated |
 | `ArchTest.Metrics` | Coupling, instability, distance from main sequence |
 | `ArchTest.Freeze` | Baseline violations for gradual adoption |
 | `ArchTest.Collector.calls/2` | Function-level call metadata with file/line |
@@ -410,6 +411,52 @@ end
   the supervision tree.
 
 See the [processes guide](guides/processes.md).
+
+---
+
+## Test code
+
+`ArchTest.TestCode` checks your tests against your code. ExUnit compiles test
+files in memory, so these rules read the `*_test.exs` files from source.
+
+```elixir
+defmodule MyApp.TestRulesTest do
+  use ExUnit.Case
+  use ArchTest, app: :my_app
+  use ArchTest.TestCode
+
+  test "tests use their subject" do
+    tests_use_their_subject(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "tests mock only I/O" do
+    tests_dont_mock_pure_modules(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "tests don't sleep" do
+    tests_dont_sleep(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "async tests share no state" do
+    async_tests_share_no_state(modules_matching("MyApp.**"), app: :my_app)
+  end
+end
+```
+
+- **`tests_use_their_subject`** flags `MyApp.AccountsTest` when it never uses
+  `MyApp.Accounts`, or only mocks it. Requests through `Phoenix.ConnTest`,
+  `LiveViewTest` and `ChannelTest` count for controllers, live views and
+  channels.
+- **`tests_dont_mock_pure_modules`** flags Mimic, Mock and Mox mocks of code
+  that touches nothing outside it: a test of the mock checks nothing.
+- **`tests_dont_sleep`** flags `Process.sleep/1` and `:timer.sleep/1`: wait
+  with `assert_receive` or a monitor instead.
+- **`async_tests_share_no_state`** flags `Application.put_env/3`,
+  `System.put_env/2`, `:persistent_term.put/2` and `Logger.configure/1` in
+  `async: true` tests, which leak into the tests running beside them.
+
+The subject selects test modules by name. See the
+[test code guide](guides/test-code.md).
 
 ---
 

@@ -1,0 +1,301 @@
+defmodule ArchTest.TestCode do
+  @moduledoc """
+  Rules about tests: that they test the module they're named after, mock only what does I/O, wait for results
+  instead of sleeping, and don't change global state while other tests run.
+
+  ExUnit compiles test files in memory as it runs them, so these rules read the `*_test.exs` files under
+  `:test_paths` (default `["test"]`) from source, with aliases resolved. They check them against the production
+  code, read from debug info as `ArchTest.Effects` does: which module a test is named after, and what a mocked
+  module does.
+
+  ## Usage
+
+      defmodule MyApp.TestRulesTest do
+        use ExUnit.Case
+        use ArchTest, app: :my_app
+        use ArchTest.TestCode
+
+        test "tests use their subject" do
+          tests_use_their_subject(modules_matching("MyApp.**"), app: :my_app)
+        end
+
+        test "tests mock only I/O" do
+          tests_dont_mock_pure_modules(modules_matching("MyApp.**"), app: :my_app)
+        end
+
+        test "tests don't sleep" do
+          tests_dont_sleep(modules_matching("MyApp.**"), app: :my_app)
+        end
+
+        test "async tests share no state" do
+          async_tests_share_no_state(modules_matching("MyApp.**"), app: :my_app)
+        end
+      end
+
+  The subject selects test modules by name, so `modules_matching("MyApp.**")` checks `MyApp.AccountsTest`.
+  """
+
+  alias ArchTest.{Code, ModuleSet, TestSource, Violation}
+  alias ArchTest.Code.{Effects, Rules}
+
+  @sleeps [{Process, :sleep}, {:timer, :sleep}]
+  @global %{
+    Application => [:put_env, :delete_env, :put_all_env],
+    System => [:put_env, :delete_env],
+    :persistent_term => [:put, :erase],
+    Logger => [
+      :configure,
+      :configure_backend,
+      :add_backend,
+      :remove_backend,
+      :put_module_level,
+      :put_application_level,
+      :delete_module_level,
+      :delete_application_level
+    ],
+    :logger => [
+      :set_primary_config,
+      :update_primary_config,
+      :add_handler,
+      :remove_handler,
+      :set_module_level
+    ]
+  }
+  # Requests Phoenix's ConnTest, LiveViewTest and ChannelTest send through the endpoint or the socket, which reach
+  # its controllers, live views and channels.
+  @requests ~w(get post put patch delete head options dispatch live live_isolated subscribe_and_join join push)a
+  @web ~r/Web\.|(Controller|Live|LiveView|Component|Channel|Plug|Socket)$/
+  @mock_fix "use the real module, and mock only the ones that touch the database, the network or other services"
+
+  @doc false
+  defmacro __using__(_opts) do
+    quote do
+      import ArchTest.TestCode
+    end
+  end
+
+  @doc """
+  Asserts that each test module exercises the module it's named after: `MyApp.AccountsTest` uses
+  `MyApp.Accounts`, and not only through mocks of it.
+
+  A use is the module's name anywhere in the test, other than as the module a mock replaces, a call to one of
+  its functions the test doesn't mock, or a use of a module nested in it, as `MyApp.Billing.Invoice` is in
+  `MyApp.Billing`. A test of a controller, live view or channel that sends requests through `Phoenix.ConnTest`,
+  `Phoenix.LiveViewTest` or `Phoenix.ChannelTest` uses it too. Tests named after no module in scope are skipped.
+  """
+  @spec tests_use_their_subject(ModuleSet.t(), keyword()) :: :ok
+  def tests_use_their_subject(%ModuleSet{} = subject, opts \\ []) do
+    {tests, code, _effects, _source} = analyze(subject, opts)
+
+    violations =
+      for test <- tests,
+          target = named_after(test.name),
+          MapSet.member?(code.scope, target),
+          usage = usage(test, target),
+          usage != :uses do
+        {verb, fix} =
+          case usage do
+            :mocks ->
+              {"only mocks", "test the real #{inspect(target)}, and mock only what it calls"}
+
+            :never ->
+              {"never uses",
+               "test #{inspect(target)} itself, or name the test after the module it tests"}
+          end
+
+        violation(test, "tests_use_their_subject", test.line,
+          message:
+            "#{inspect(test.name)} #{verb} #{inspect(target)}, the module it's named after",
+          fix: fix
+        )
+      end
+
+    Rules.report(violations, "tests_use_their_subject")
+  end
+
+  @doc """
+  Asserts that tests mock only modules that do I/O.
+
+  A mock is `Mimic.stub/3`, `Mimic.expect/3`, `Mock.with_mock/3` and the like on a project module, or a Mox mock
+  declared with `Mox.defmock/2` for a behaviour. It's flagged when the function it replaces, or every
+  implementation of the behaviour, touches nothing outside the code: a real one is as cheap to call, and a test of
+  the mock checks nothing about the code.
+  """
+  @spec tests_dont_mock_pure_modules(ModuleSet.t(), keyword()) :: :ok
+  def tests_dont_mock_pure_modules(%ModuleSet{} = subject, opts \\ []) do
+    {tests, code, effects, source} = analyze(subject, opts)
+
+    violations =
+      for test <- tests,
+          mock <- test.mocks,
+          message <- List.wrap(pure_mock(mock, code, effects, source)) do
+        violation(test, "tests_dont_mock_pure_modules", mock.line,
+          message:
+            "#{mock.label} mocks #{message}, so the test checks the mock instead of the code",
+          fix: @mock_fix
+        )
+      end
+
+    Rules.report(violations, "tests_dont_mock_pure_modules")
+  end
+
+  @doc """
+  Asserts that no test sleeps, with `Process.sleep/1` or `:timer.sleep/1`.
+
+  A sleep long enough on a fast machine is too short on a slow one, and slows every run. Wait for what the test
+  needs instead: `assert_receive/3` for a message, or a monitor's `:DOWN` message for a process to stop.
+  """
+  @spec tests_dont_sleep(ModuleSet.t(), keyword()) :: :ok
+  def tests_dont_sleep(%ModuleSet{} = subject, opts \\ []) do
+    {tests, _code, _effects, _source} = analyze(subject, opts)
+
+    violations =
+      for test <- tests,
+          %{target: {module, name, _arity} = target} = call <- test.calls,
+          {module, name} in @sleeps do
+        violation(test, "tests_dont_sleep", call.line,
+          message:
+            "#{call.label} sleeps with #{Rules.name(target, test.name)}, which is too short on a slow machine " <>
+              "and slows every run",
+          fix:
+            "wait for what the test needs instead, with assert_receive or a monitor's :DOWN message"
+        )
+      end
+
+    Rules.report(violations, "tests_dont_sleep")
+  end
+
+  @doc """
+  Asserts that tests running async don't change global state.
+
+  `Application.put_env/3`, `System.put_env/2`, `:persistent_term.put/2`, `Logger.configure/1` and the like change
+  state every test sees, so in a module with `async: true` they make the tests running at the same time pass or
+  fail by timing. Pass the value to the code under test instead, or make the module `async: false`.
+  """
+  @spec async_tests_share_no_state(ModuleSet.t(), keyword()) :: :ok
+  def async_tests_share_no_state(%ModuleSet{} = subject, opts \\ []) do
+    {tests, _code, _effects, _source} = analyze(subject, opts)
+
+    violations =
+      for test <- tests,
+          test.async,
+          %{target: {module, name, _arity} = target} = call <- test.calls,
+          name in Map.get(@global, module, []) do
+        violation(test, "async_tests_share_no_state", call.line,
+          message:
+            "#{call.label} changes global state with #{Rules.name(target, test.name)} in an async test, " <>
+              "so tests running at the same time can see it",
+          fix:
+            "pass the value to the code under test instead, or make the test module async: false"
+        )
+      end
+
+    Rules.report(violations, "async_tests_share_no_state")
+  end
+
+  defp analyze(subject, opts) do
+    source = TestSource.load(opts)
+    names = Map.new(source.modules, &{&1.name, []})
+    selected = subject |> ModuleSet.resolve(names) |> MapSet.new()
+
+    tests =
+      source.modules |> Enum.filter(&MapSet.member?(selected, &1.name)) |> Enum.sort_by(& &1.file)
+
+    code = Code.load_scope(opts)
+
+    {tests, code, Effects.of(code), source}
+  end
+
+  defp named_after(test) do
+    name = Atom.to_string(test)
+
+    if String.ends_with?(name, "Test"),
+      do: name |> String.replace_suffix("Test", "") |> String.to_atom()
+  end
+
+  # Whether a test uses `target`, only mocks it, or never names it.
+  defp usage(test, target) do
+    mocked = for %{module: ^target, function: function} <- test.mocks, do: function
+
+    cond do
+      uses?(test, target, mocked) -> :uses
+      mocked != [] or Enum.any?(test.calls, &match?(%{target: {^target, _, _}}, &1)) -> :mocks
+      true -> :never
+    end
+  end
+
+  defp uses?(test, target, mocked) do
+    target in test.references or real_call?(test, target, mocked) or nested?(test, target) or
+      (Regex.match?(@web, inspect(target)) and requests?(test))
+  end
+
+  # A call to one of the target's functions the test doesn't replace with a mock.
+  defp real_call?(test, target, mocked) do
+    nil not in mocked and
+      Enum.any?(test.calls, fn
+        %{target: {^target, name, _arity}} -> name not in mocked
+        _call -> false
+      end)
+  end
+
+  # A module nested in the target, as `MyApp.Billing.Invoice` is in `MyApp.Billing`, stands for it.
+  defp nested?(test, target) do
+    prefix = Atom.to_string(target) <> "."
+    called = for %{target: {module, _, _}} when is_atom(module) <- test.calls, do: module
+
+    Enum.any?(test.references ++ called, &String.starts_with?(Atom.to_string(&1), prefix))
+  end
+
+  defp requests?(test),
+    do: Enum.any?(test.calls, &match?(%{target: {:local, name, _}} when name in @requests, &1))
+
+  # What a mock replaces, when that touches nothing outside the code: a Mox mock's behaviour, or a project module.
+  defp pure_mock(%{module: module, function: function}, code, effects, source) do
+    case Map.fetch(source.mocks, module) do
+      {:ok, behaviours} -> pure_behaviours(module, behaviours, function, code, effects)
+      :error -> pure_module(module, function, code, effects)
+    end
+  end
+
+  defp pure_behaviours(mock, behaviours, function, code, effects) do
+    implementations =
+      for {implementation, info} <- code.modules,
+          Enum.any?(behaviours, &(&1 in info.behaviours)),
+          do: implementation
+
+    if pure?(implementations, function, code, effects) do
+      "#{inspect(mock)}, whose #{Enum.map_join(behaviours, ", ", &inspect/1)} implementations touch nothing " <>
+        "outside them"
+    end
+  end
+
+  defp pure_module(module, function, code, effects) do
+    if MapSet.member?(code.scope, module) and pure?([module], function, code, effects) do
+      replaced = if function, do: "#{inspect(module)}.#{function}", else: inspect(module)
+      "#{replaced}, which touches nothing outside it"
+    end
+  end
+
+  defp pure?(modules, function, code, effects) do
+    functions =
+      for module <- modules,
+          {{^module, name, _arity} = key, info} <- Code.functions_of(code, module),
+          info.kind == :def and not info.injected and (function == nil or name == function),
+          do: key
+
+    functions != [] and Enum.all?(functions, &(Map.get(effects, &1, %{}) == %{}))
+  end
+
+  defp violation(test, rule, line, details) do
+    %Violation{
+      type: :custom,
+      rule: rule,
+      module: test.name,
+      caller: test.name,
+      file: test.file,
+      line: line,
+      message: Keyword.fetch!(details, :message),
+      fix: Keyword.fetch!(details, :fix)
+    }
+  end
+end

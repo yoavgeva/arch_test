@@ -80,6 +80,7 @@ defmodule ArchTest.MixProject do
         "guides/freezing.md",
         "guides/effects.md",
         "guides/processes.md",
+        "guides/test-code.md",
         {"test/support/fixture_app/README.md",
          [filename: "fixture-app-examples", title: "FixtureApp Architecture Examples"]},
         "cheatsheets/arch_test.cheatmd",
@@ -95,7 +96,8 @@ defmodule ArchTest.MixProject do
           "guides/modulith-rules.md",
           "guides/freezing.md",
           "guides/effects.md",
-          "guides/processes.md"
+          "guides/processes.md",
+          "guides/test-code.md"
         ],
         Examples: [
           "test/support/fixture_app/README.md"
