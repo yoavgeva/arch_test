@@ -89,8 +89,9 @@ defmodule ArchTest.Code.Authorization do
     do: MapSet.new(behalf(info, loads_for_user?(code, module), code))
 
   @doc false
-  # Whether a policy checks the endpoint: it, or its controller's plug pipeline, calls one, directly or through what
-  # it calls, or every route to it goes through a pipeline or `live_session` hook that does.
+  # Whether a policy checks the endpoint: it, its controller's plug pipeline, or its LiveView's own `on_mount` hooks,
+  # call one, directly or through what they call, or every route to it goes through a pipeline or `live_session` hook
+  # that does.
   @spec checked?(Code.t(), routes(), Code.key(), [module()]) :: boolean()
   def checked?(code, routes, endpoint, policies),
     do:
@@ -98,9 +99,10 @@ defmodule ArchTest.Code.Authorization do
         routed_through_policy?(routes, endpoint, policies, code)
 
   defp checks_policy?(code, {module, _, _} = endpoint, policies) do
+    # `on_mount` in a LiveView compiles into its __live__/0, as a capture of each hook's on_mount/4.
     start =
       Enum.filter(
-        [endpoint, {module, :phoenix_controller_pipeline, 2}],
+        [endpoint, {module, :phoenix_controller_pipeline, 2}, {module, :__live__, 0}],
         &Map.has_key?(code.functions, &1)
       )
 

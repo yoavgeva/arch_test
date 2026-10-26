@@ -206,8 +206,8 @@ end
 - **every route to it is a GET or HEAD**: a request to read, so what it writes is bookkeeping, as a cache or a view
   count is;
 - **or a policy is checked**: the endpoint, one of its controller's plugs, a pipeline every route to the action
-  goes through, as `pipe_through :require_admin` does, or, for a LiveView's events, the `on_mount` hooks of the
-  `live_session` every route to it is in, calls `Bodyguard`, `Canada`, or a module given as `policy:`:
+  goes through, as `pipe_through :require_admin` does, or, for a LiveView's events, its own `on_mount` hooks or
+  those of the `live_session` every route to it is in, calls `Bodyguard`, `Canada`, or a module given as `policy:`:
 
 ```elixir
 writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app,

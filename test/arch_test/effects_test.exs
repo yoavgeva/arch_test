@@ -426,6 +426,20 @@ defmodule ArchTest.EffectsTest do
            {:noreply, socket}
          end
        end
+
+       # `on_mount EffectsFixture.PostAdminHook` in the LiveView itself, as Phoenix compiles it into __live__/0.
+       defmodule EffectsFixture.PostArchiveLive do
+         @behaviour Phoenix.LiveView
+
+         def __live__ do
+           %{lifecycle: %{mount: [%{id: {EffectsFixture.PostAdminHook, :default}, function: &EffectsFixture.PostAdminHook.on_mount/4, stage: :mount}]}}
+         end
+
+         def handle_event("archive", %{"id" => id}, socket) do
+           EffectsFixture.Posts.update_post(id, %{archived: true})
+           {:noreply, socket}
+         end
+       end
        """},
       {@billing,
        """

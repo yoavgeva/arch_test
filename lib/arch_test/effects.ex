@@ -234,8 +234,9 @@ defmodule ArchTest.Effects do
   - it's a LiveView event that writes to a record the socket's assigns hold, as `socket.assigns.post`, and the
     LiveView's `mount/3` or `handle_params/3` loads records for the user asking, or the LiveComponent's `update/2`
     is given the user by its parent;
-  - it, one of its controller's plugs, every router pipeline to it, or every `live_session` `on_mount` hook to its
-    LiveView, calls a policy: `Bodyguard`, `Canada`, or a module given as `policy:`;
+  - it, one of its controller's plugs, every router pipeline to it, or an `on_mount` hook of its LiveView, in the
+    LiveView or in every `live_session` to it, calls a policy: `Bodyguard`, `Canada`, or a module given as
+    `policy:`;
   - or every route to it is a GET or HEAD: a request to read, so what it writes is bookkeeping, as a cache or a
     view count is.
 
