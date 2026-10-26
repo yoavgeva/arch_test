@@ -27,7 +27,8 @@ defmodule ArchTest.TestSource do
           tests: boolean(),
           calls: [call()],
           references: [module()],
-          mocks: [mock()]
+          mocks: [mock()],
+          imports: [{module(), [{atom(), arity()}] | nil}]
         }
   @type t :: %__MODULE__{
           modules: [test_module()],
@@ -118,6 +119,7 @@ defmodule ArchTest.TestSource do
       calls: [],
       references: [],
       mocks: [],
+      imports: [],
       done: [],
       defmocks: []
     }
@@ -147,8 +149,14 @@ defmodule ArchTest.TestSource do
     }
   end
 
-  defp walk({:import, _, [target | _options]}, state),
-    do: %{state | references: [resolve(target, state) | state.references]}
+  # An import, with the functions its `only:` names, or `nil` when it names none.
+  defp walk({:import, _, [target | options]}, state) do
+    module = resolve(target, state)
+    only = options |> List.flatten() |> Keyword.get(:only)
+    only = if is_list(only), do: only
+
+    %{state | references: [module | state.references], imports: [{module, only} | state.imports]}
+  end
 
   defp walk({:test, _, [name | rest]}, state) when is_binary(name),
     do: labelled(rest, ~s(test "#{name}"), %{state | tests: true})
@@ -274,7 +282,8 @@ defmodule ArchTest.TestSource do
       tests: state.tests,
       calls: Enum.reverse(state.calls),
       references: state.references |> Enum.reject(&is_nil/1) |> Enum.uniq(),
-      mocks: Enum.reverse(state.mocks)
+      mocks: Enum.reverse(state.mocks),
+      imports: Enum.reject(state.imports, &is_nil(elem(&1, 0)))
     }
   end
 

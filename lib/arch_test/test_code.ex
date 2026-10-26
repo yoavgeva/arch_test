@@ -254,7 +254,7 @@ defmodule ArchTest.TestCode do
   # or through the functions it calls, or through a test helper's calls.
   defp exercised?(test, target, code, source) do
     helpers =
-      for %{target: {module, _, _}} <- test.calls,
+      for module <- helper_modules(test),
           call <- Map.get(source.support, module, []),
           do: call
 
@@ -267,6 +267,23 @@ defmodule ArchTest.TestCode do
 
     reach(start, MapSet.new(start), target, code)
   end
+
+  # The modules a test calls, and those it imports a function it calls from, as `findings(text)` is from
+  # `import MyApp.Test.Linting, only: [findings: 1]`.
+  defp helper_modules(test) do
+    called = for %{target: {module, _, _}} <- test.calls, module != :local, do: module
+
+    imported =
+      for {module, only} <- test.imports,
+          Enum.any?(test.calls, &imported?(&1, only)),
+          do: module
+
+    Enum.uniq(called ++ imported)
+  end
+
+  defp imported?(%{target: {:local, _name, _arity}}, nil), do: true
+  defp imported?(%{target: {:local, name, arity}}, only), do: {name, arity} in only
+  defp imported?(_call, _only), do: false
 
   defp reach([], _seen, _target, _code), do: false
 

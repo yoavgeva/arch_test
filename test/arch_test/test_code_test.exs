@@ -62,8 +62,12 @@ defmodule ArchTest.TestCodeTest do
          def check(text), do: if(String.contains?(text, "\t"), do: [:tab], else: [])
        end
 
+       defmodule TestFixture.Rules.Shouting do
+         def check(text), do: if(text == String.upcase(text), do: [:shouting], else: [])
+       end
+
        defmodule TestFixture.Registry do
-         def rules, do: [TestFixture.Rules.Length, TestFixture.Rules.Width]
+         def rules, do: [TestFixture.Rules.Length, TestFixture.Rules.Width, TestFixture.Rules.Shouting]
        end
 
        defmodule TestFixture.Linter do
@@ -210,6 +214,17 @@ defmodule ArchTest.TestCodeTest do
 
       test "flags tabs, through a test helper" do
         assert TestFixture.Test.Linting.findings("a\tb") == [:tab]
+      end
+    end
+    """)
+
+    write_test("test/test_fixture/rules/shouting_test.exs", """
+    defmodule TestFixture.Rules.ShoutingTest do
+      use ExUnit.Case, async: true
+      import TestFixture.Test.Linting, only: [findings: 1]
+
+      test "flags shouting, through an imported test helper" do
+        assert findings("STOP") == [:shouting]
       end
     end
     """)
