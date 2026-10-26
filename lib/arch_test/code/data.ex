@@ -18,8 +18,9 @@ defmodule ArchTest.Code.Data do
           overrides: [String.t()]
         }
 
-  # What turns a value into a new one, here an old value of the field it's written back to.
-  @operators [:+, :-, :*, :/, :++, :<>, :div, :rem]
+  # What turns a value into a new one, here an old value of the field it's written back to: arithmetic, and appending
+  # to a list. Concatenating a string formats it, as `"New " <> post.title` does, rather than counting with it.
+  @operators [:+, :-, :*, :/, :++, :div, :rem]
   @decimal [:add, :sub, :mult, :div]
   # Selects that return one row, or one per group, rather than a table.
   @aggregates [:count, :sum, :avg, :min, :max]
