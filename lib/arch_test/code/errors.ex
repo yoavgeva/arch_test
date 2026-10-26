@@ -70,7 +70,7 @@ defmodule ArchTest.Code.Errors do
     |> Enum.map(fn {_meta, _args, _guards, body} -> body end)
     |> Macro.prewalk([], fn
       {:->, meta, [patterns, body]}, acc ->
-        if error?(tail(body)),
+        if failing?(patterns, body),
           do: {{:->, meta, [patterns, nil]}, acc},
           else: {{:->, meta, [patterns, body]}, acc}
 
@@ -79,6 +79,22 @@ defmodule ArchTest.Code.Errors do
     end)
     |> elem(1)
     |> Enum.reverse()
+  end
+
+  # A clause on a failing path: it returns an error, or passes on the one its pattern matched, as
+  # `{:error, reason} -> ...; {:discard, reason}` does.
+  defp failing?(patterns, body) do
+    error_pattern? =
+      patterns
+      |> Macro.prewalk(false, fn
+        {:error, _} = node, _found -> {node, true}
+        node, found -> {node, found}
+      end)
+      |> elem(1)
+
+    error?(tail(body)) or
+      (error_pattern? and
+         not MapSet.disjoint?(MapSet.new(vars(patterns)), MapSet.new(vars(tail(body)))))
   end
 
   @doc false
@@ -209,8 +225,14 @@ defmodule ArchTest.Code.Errors do
   end
 
   # `false` beside a clause returning `true` answers whether the call succeeded, as `match?({:ok, _}, call)` does.
-  defp predicate?(body, clauses),
-    do: tail(body) == false and Enum.any?(clauses, &match?({:->, _, [_, true]}, &1))
+  # `false` beside a clause returning `true` answers whether the call succeeded, as `match?({:ok, _}, call)` does. An
+  # atom beside clauses that all return atoms classifies the outcome, as `:available` beside `:taken` does.
+  defp predicate?(body, clauses) do
+    tails = for {:->, _, [_patterns, other]} <- clauses, do: tail(other)
+
+    (tail(body) == false and true in tails) or
+      (is_atom(tail(body)) and Enum.all?(tails, &(is_atom(&1) and &1 not in [nil, :ok])))
+  end
 
   defp swallow(meta, handler, returns, sources),
     do: %{line: meta[:line], handler: handler, returns: returns, sources: sources}
@@ -286,9 +308,11 @@ defmodule ArchTest.Code.Errors do
       {{:., _, [_fun]}, _, args} = node, acc when is_list(args) ->
         {node, [{:dynamic, nil, length(args)} | acc]}
 
-      {{:., _, [callee, name]}, _, args} = node, acc
+      {{:., _, [callee, name]}, meta, args} = node, acc
       when is_atom(name) and is_list(args) and not is_atom(callee) ->
-        {node, [{:dynamic, name, length(args)} | acc]}
+        if Keyword.get(meta, :no_parens, false),
+          do: {node, acc},
+          else: {node, [{:dynamic, name, length(args)} | acc]}
 
       node, acc ->
         {node, List.wrap(target(node, module, locals)) ++ acc}
