@@ -159,8 +159,34 @@ failing test first: maps the code builds, keys it sets or drops, rebound
 variables, helpers that check the user or open a transaction, and records a
 LiveView loaded for the user.
 
+Every rule then ran on thirteen more projects, most of them not Phoenix apps:
+Ecto, Absinthe, Credo, ExDoc, Bandit, Swoosh, Supabase Realtime, Logflare,
+OpenFn Lightning, NervesHub, Sequin, Pinchflat and Firezone. The false
+positives fixed, each with a failing test first:
+
+- Tests reach their subject through protocol implementations, including one
+  written inside the subject's file, modules named in `use` options, the
+  subject's macros and sigils, PhoenixTest's `visit/2`, and the `init/1` of a
+  supervisor started with `start_supervised!`. Functions with computed names,
+  as `def unquote(:*)(conn)`, no longer stop the test rules.
+- Timers (`Process.send_after/3`) and runtime monitors
+  (`:erlang.system_monitor/2`, `:net_kernel.monitor_nodes/1`) are process
+  work; a receive loop that calls itself after the receive is a process's loop.
+- A behaviour's callback may return `{:error, :not_implemented}`.
+- `Repo.in_transaction?/0` writes nothing.
+- The user asking includes an auth `subject`, and a record compared with the
+  user's before a call is checked for it; one compared after the write, to
+  pick a redirect, isn't. Functions captured alongside the user run on their
+  behalf.
+- A LiveView's own `on_mount` hooks check its events, and LiveViews that check
+  a policy check the LiveComponents they render.
+- Joins with a pinned condition aren't unbounded, and a changeset that's only
+  validated, never saved, isn't mass assignment.
+
 ### Fixed
 
+- `tests_dont_mock_pure_modules` finds the code reaching outside calls once,
+  not once per mock: it took six minutes on Lightning and now takes seconds.
 - Elixir 1.20's compiler warnings: an unused `require Logger` in
   `ArchTest.Collector`, and an always-true `is_list/1` check in
   `ArchTest.Metrics`.
