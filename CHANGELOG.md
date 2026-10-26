@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-26
 
 ### Added
 
@@ -44,7 +44,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `{:error, :not_implemented}`.
   - `no_functions_only_tests_call/2` flags `@doc false` functions only tests
     call.
-- The effects, processes and test code guides.
+- `ArchTest.Recommended.check/2` runs the design rules worth holding any
+  project to, and reports what each finds in one assertion, with an `:except`
+  option. `mix arch_test.gen.design` writes a test running it, frozen.
+- The effects, processes and test code guides, and the design rule examples
+  guide, whose examples a test compiles and checks.
+- CI runs on Elixir 1.20 and OTP 29.
+
+### Fixed
+
+- Elixir 1.20's compiler warnings: an unused `require Logger` in
+  `ArchTest.Collector`, and an always-true `is_list/1` check in
+  `ArchTest.Metrics`.
 
 ## [0.3.1] - 2026-05-21
 

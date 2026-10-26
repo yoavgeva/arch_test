@@ -292,6 +292,15 @@ no_stubs(modules_matching("MyApp.**"), app: :my_app)
 no_functions_only_tests_call(modules_matching("MyApp.**"), app: :my_app)
 ```
 
+## Recommended Design Rules
+
+```elixir
+# every recommended design rule, one report, frozen for gradual adoption
+ArchTest.Freeze.freeze("recommended_design_rules", fn ->
+  ArchTest.Recommended.check(modules_matching("MyApp.**"), app: :my_app, except: [:tests_dont_sleep])
+end)
+```
+
 ## Coupling Metrics
 
 ```elixir

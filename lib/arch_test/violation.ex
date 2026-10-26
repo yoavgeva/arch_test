@@ -210,7 +210,8 @@ defmodule ArchTest.Violation do
 
     fix = if v.fix, do: "\n      → fix: #{v.fix}", else: ""
 
-    "    ✗ #{format_location(v.file, v.line) || "(no location)"} #{function}\n      #{v.message}#{fix}"
+    location = format_location(v.file, v.line) || "(no location)"
+    "    ✗ #{location} #{function} [#{rule}]\n      #{v.message}#{fix}"
   end
 
   defp format_single(%__MODULE__{type: :cycle, path: path, message: msg}) when not is_nil(path) do

@@ -10,6 +10,7 @@ defmodule MixTasksTest do
   @all_task_modules [
     Mix.Tasks.ArchTest.Install,
     Mix.Tasks.ArchTest.Gen.Conventions,
+    Mix.Tasks.ArchTest.Gen.Design,
     Mix.Tasks.ArchTest.Gen.Freeze,
     Mix.Tasks.ArchTest.Gen.Layers,
     Mix.Tasks.ArchTest.Gen.Modulith,
@@ -301,6 +302,35 @@ defmodule MixTasksTest do
         |> content("test/arch/conventions_arch_test.exs")
 
       assert c =~ ~s("MyApp.**")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # arch_test.gen.design
+  # ---------------------------------------------------------------------------
+
+  describe "Mix.Tasks.ArchTest.Gen.Design" do
+    test "creates test/arch/design_arch_test.exs" do
+      run_task(Mix.Tasks.ArchTest.Gen.Design)
+      |> assert_creates("test/arch/design_arch_test.exs")
+    end
+
+    test "runs the recommended design rules, scoped to the app" do
+      c =
+        run_task(Mix.Tasks.ArchTest.Gen.Design)
+        |> content("test/arch/design_arch_test.exs")
+
+      assert c =~ "defmodule MyApp.Design.ArchTest"
+      assert_scoped_to_app(c)
+      assert c =~ ~s|ArchTest.Recommended.check(modules_matching("MyApp.**"), app: :my_app)|
+    end
+
+    test "freezes existing violations, so adopting it fails only on new ones" do
+      c =
+        run_task(Mix.Tasks.ArchTest.Gen.Design)
+        |> content("test/arch/design_arch_test.exs")
+
+      assert c =~ ~s|ArchTest.Freeze.freeze("recommended_design_rules", fn ->|
     end
   end
 

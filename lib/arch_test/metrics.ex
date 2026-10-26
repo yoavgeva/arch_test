@@ -241,9 +241,8 @@ defmodule ArchTest.Metrics do
   end
 
   defp behaviour?(mod) do
-    # A module is a behaviour if it defines callbacks via behaviour_info/1
-    callbacks = mod.behaviour_info(:callbacks)
-    is_list(callbacks) and callbacks != []
+    # A module is a behaviour if it defines callbacks via behaviour_info/1, which raises for other modules
+    mod.behaviour_info(:callbacks) != []
   rescue
     _ -> false
   end

@@ -10,8 +10,6 @@ defmodule ArchTest.Collector do
   standard OTP applications.
   """
 
-  require Logger
-
   @cache_key {__MODULE__, :graph}
   @call_cache_key {__MODULE__, :calls}
 

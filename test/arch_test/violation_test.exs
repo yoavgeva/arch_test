@@ -144,9 +144,9 @@ defmodule ArchTest.ViolationTest do
       }
     end
 
-    test "shows where it is, the function, and the fix", %{violation: violation} do
+    test "shows where it is, the function, its rule, and the fix", %{violation: violation} do
       assert Violation.format(violation) ==
-               "    ✗ lib/my_app/orders.ex:5 MyApp.Orders.with_users/1\n" <>
+               "    ✗ lib/my_app/orders.ex:5 MyApp.Orders.with_users/1 [no_queries_in_loops]\n" <>
                  "      queries the database once per item: Enum.map/2 calls MyApp.Accounts.get_user!/1\n" <>
                  "      → fix: load what the loop needs with one query before it"
     end

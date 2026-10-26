@@ -1,0 +1,509 @@
+# Design Rule Examples
+
+Every design rule of `ArchTest.Effects`, `ArchTest.Processes`, `ArchTest.TestCode` and `ArchTest.Guardrails`, with
+code it flags, marked `# ✗`, and under **Fixed** the files that change to fix it. The examples are a small `Shop` app
+whose `Shop.Repo` is an Ecto repo. A test compiles every example and runs its rule on it, so they show what the rules
+really do.
+
+## Effects
+
+### `no_queries_in_loops`
+
+`ArchTest.Effects.no_queries_in_loops(modules_matching("Shop.**"))`
+
+A query once per item turns a page of 50 orders into 51 round trips, even when the query is a call away.
+
+```elixir
+defmodule Shop.Accounts do
+  alias Shop.Repo
+
+  def get_user!(id), do: Repo.get!(Shop.User, id)
+  def list_users(ids), do: Repo.all({Shop.User, ids})
+end
+```
+
+```elixir
+defmodule Shop.Orders do
+  alias Shop.Accounts
+
+  def with_users(orders) do
+    # ✗ one query per order, through Accounts.get_user!/1
+    Enum.map(orders, fn order -> {order, Accounts.get_user!(order.user_id)} end)
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+One query loads every user the orders need.
+
+```elixir
+defmodule Shop.Orders do
+  alias Shop.Accounts
+
+  def with_users(orders) do
+    users = orders |> Enum.map(& &1.user_id) |> Accounts.list_users() |> Map.new(&{&1.id, &1})
+    Enum.map(orders, fn order -> {order, users[order.user_id]} end)
+  end
+end
+```
+
+</details>
+
+### `should_be_free_of_side_effects`
+
+`ArchTest.Effects.should_be_free_of_side_effects(modules_matching("Shop.Pricing.**"))`
+
+A functional core that reads the clock gives a different answer every day, so its tests can't pin one down.
+
+```elixir
+defmodule Shop.Pricing.Discounts do
+  def weekend_discount(price) do
+    # ✗ reads the clock
+    if Date.day_of_week(Date.utc_today()) >= 6, do: price * 0.9, else: price
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+The core takes the date, and the code around it reads the clock.
+
+```elixir
+defmodule Shop.Pricing.Discounts do
+  def weekend_discount(price, today) do
+    if Date.day_of_week(today) >= 6, do: price * 0.9, else: price
+  end
+end
+```
+
+```elixir
+defmodule Shop.Checkout do
+  def price(item), do: Shop.Pricing.Discounts.weekend_discount(item.price, Date.utc_today())
+end
+```
+
+</details>
+
+### `no_work_in_init`
+
+`ArchTest.Effects.no_work_in_init(modules_matching("Shop.**"))`
+
+A supervisor waits for each child's `init/1`, so slow or failing I/O there holds up or stops the whole application.
+
+```elixir
+defmodule Shop.PriceCache do
+  use GenServer
+
+  def start_link(path), do: GenServer.start_link(__MODULE__, path, name: __MODULE__)
+
+  @impl true
+  # ✗ reads a file while its supervisor waits
+  def init(path), do: {:ok, File.read!(path)}
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.PriceCache do
+  use GenServer
+
+  def start_link(path), do: GenServer.start_link(__MODULE__, path, name: __MODULE__)
+
+  @impl true
+  def init(path), do: {:ok, %{path: path}, {:continue, :load}}
+
+  @impl true
+  def handle_continue(:load, state), do: {:noreply, Map.put(state, :prices, File.read!(state.path))}
+end
+```
+
+</details>
+
+## Processes
+
+### `processes_have_one_interface`
+
+`ArchTest.Processes.processes_have_one_interface(modules_matching("Shop.**"))`
+
+When other modules build a process's messages, what it accepts is spread over all of them.
+
+```elixir
+defmodule Shop.Cache do
+  use GenServer
+
+  def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
+
+  @impl true
+  def init(state), do: {:ok, state}
+
+  @impl true
+  def handle_call({:fetch, key}, _from, state), do: {:reply, Map.get(state, key), state}
+end
+```
+
+```elixir
+defmodule Shop.Pricing do
+  # ✗ builds Shop.Cache's message
+  def price(item), do: GenServer.call(Shop.Cache, {:fetch, item})
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Cache do
+  use GenServer
+
+  def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
+  def fetch(key), do: GenServer.call(__MODULE__, {:fetch, key})
+
+  @impl true
+  def init(state), do: {:ok, state}
+
+  @impl true
+  def handle_call({:fetch, key}, _from, state), do: {:reply, Map.get(state, key), state}
+end
+```
+
+```elixir
+defmodule Shop.Pricing do
+  def price(item), do: Shop.Cache.fetch(item)
+end
+```
+
+</details>
+
+### `processes_hold_state`
+
+`ArchTest.Processes.processes_hold_state(modules_matching("Shop.**"))`
+
+A GenServer that only computes makes its callers wait in one queue for work they could do themselves.
+
+```elixir
+defmodule Shop.Calculator do
+  use GenServer
+
+  def start_link(_opts), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+  def add(a, b), do: GenServer.call(__MODULE__, {:add, a, b})
+
+  @impl true
+  def init(:ok), do: {:ok, %{}}
+
+  @impl true
+  # ✗ keeps its state and touches nothing: no reason to be a process
+  def handle_call({:add, a, b}, _from, state), do: {:reply, a + b, state}
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Calculator do
+  def add(a, b), do: a + b
+end
+```
+
+</details>
+
+### `processes_are_supervised`
+
+`ArchTest.Processes.processes_are_supervised(modules_matching("Shop.**"))`
+
+Nothing notices when an unsupervised process crashes, and shutdown doesn't stop it.
+
+```elixir
+defmodule Shop.Notifier do
+  # ✗ nothing watches the task
+  def notify(user), do: Task.start(fn -> deliver(user) end)
+
+  defp deliver(user), do: IO.puts("Your order shipped, #{user}")
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Notifier do
+  def notify(user), do: Task.Supervisor.start_child(Shop.TaskSupervisor, fn -> deliver(user) end)
+
+  defp deliver(user), do: IO.puts("Your order shipped, #{user}")
+end
+```
+
+</details>
+
+## Test code
+
+### `tests_use_their_subject`
+
+`ArchTest.TestCode.tests_use_their_subject(modules_matching("Shop.**"))`
+
+A test of a module that only calls a stub of it checks nothing about the module.
+
+```elixir
+defmodule Shop.Pricing do
+  def total(prices), do: Enum.sum(prices)
+end
+```
+
+```elixir
+defmodule Shop.PricingTest do
+  use ExUnit.Case, async: true
+
+  test "totals" do
+    Mimic.stub(Shop.Pricing, :total, fn _prices -> 3 end)
+    # ✗ calls the stub, not Shop.Pricing
+    assert Shop.Pricing.total([1, 2]) == 3
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.PricingTest do
+  use ExUnit.Case, async: true
+
+  test "totals" do
+    assert Shop.Pricing.total([1, 2]) == 3
+  end
+end
+```
+
+</details>
+
+### `tests_dont_mock_pure_modules`
+
+`ArchTest.TestCode.tests_dont_mock_pure_modules(modules_matching("Shop.**"))`
+
+A mock of code that touches nothing outside it replaces what's as cheap to run, and the test then checks the mock.
+
+```elixir
+defmodule Shop.Pricing do
+  def total(prices), do: Enum.sum(prices)
+end
+```
+
+```elixir
+defmodule Shop.Checkout do
+  def pay(prices), do: {:charged, Shop.Pricing.total(prices)}
+end
+```
+
+```elixir
+defmodule Shop.CheckoutTest do
+  use ExUnit.Case, async: true
+
+  test "charges the total" do
+    # ✗ Shop.Pricing.total/1 is as cheap to run as its stub
+    Mimic.stub(Shop.Pricing, :total, fn _prices -> 3 end)
+    assert Shop.Checkout.pay([1, 2]) == {:charged, 3}
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.CheckoutTest do
+  use ExUnit.Case, async: true
+
+  test "charges the total" do
+    assert Shop.Checkout.pay([1, 2]) == {:charged, 3}
+  end
+end
+```
+
+</details>
+
+### `tests_dont_sleep`
+
+`ArchTest.TestCode.tests_dont_sleep(modules_matching("Shop.**"))`
+
+A sleep long enough on a fast machine is too short on a slow one, and slows every run.
+
+```elixir
+defmodule Shop.Mailer do
+  def deliver_later(recipient), do: Task.start(fn -> send(recipient, :delivered) end)
+end
+```
+
+```elixir
+defmodule Shop.MailerTest do
+  use ExUnit.Case, async: true
+
+  test "delivers in the background" do
+    Shop.Mailer.deliver_later(self())
+    # ✗ too short on a slow machine, too long on a fast one
+    Process.sleep(100)
+    assert_received :delivered
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.MailerTest do
+  use ExUnit.Case, async: true
+
+  test "delivers in the background" do
+    Shop.Mailer.deliver_later(self())
+    assert_receive :delivered
+  end
+end
+```
+
+</details>
+
+### `async_tests_share_no_state`
+
+`ArchTest.TestCode.async_tests_share_no_state(modules_matching("Shop.**"))`
+
+Application config is global, so an async test that changes it changes it for the tests running beside it.
+
+```elixir
+defmodule Shop.Currency do
+  def default, do: Application.get_env(:shop, :currency, "USD")
+end
+```
+
+```elixir
+defmodule Shop.CurrencyTest do
+  use ExUnit.Case, async: true
+
+  test "uses the configured currency" do
+    # ✗ every test running now sees EUR
+    Application.put_env(:shop, :currency, "EUR")
+    assert Shop.Currency.default() == "EUR"
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+The configuration is passed in, so the test chooses it.
+
+```elixir
+defmodule Shop.Currency do
+  def default(config \\ Application.get_all_env(:shop)), do: Keyword.get(config, :currency, "USD")
+end
+```
+
+```elixir
+defmodule Shop.CurrencyTest do
+  use ExUnit.Case, async: true
+
+  test "uses the configured currency" do
+    assert Shop.Currency.default(currency: "EUR") == "EUR"
+  end
+end
+```
+
+</details>
+
+## Guardrails
+
+### `no_suppressions`
+
+`ArchTest.Guardrails.no_suppressions(modules_matching("Shop.**"))`
+
+A silenced warning stays a problem; AI agents silence them to get a build green.
+
+```elixir
+defmodule Shop.Report do
+  # ✗ silences Credo instead of fixing the function
+  # credo:disable-for-next-line Credo.Check.Refactor.FunctionArity
+  def line(order, user, item, price, tax, discount, shipping, currency, note) do
+    Enum.join([order, user, item, price, tax, discount, shipping, currency, note], ",")
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Report do
+  def line(row), do: Enum.join([row.order, row.user, row.item, row.price, row.currency], ",")
+end
+```
+
+</details>
+
+### `no_stubs`
+
+`ArchTest.Guardrails.no_stubs(modules_matching("Shop.**"))`
+
+A stub compiles and passes review at a glance, and does nothing.
+
+```elixir
+defmodule Shop.Refunds do
+  # ✗ stands in for code nobody wrote
+  def refund(_order), do: raise("not implemented yet")
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Refunds do
+  def refund(order), do: {:refunded, order.total}
+end
+```
+
+</details>
+
+### `no_functions_only_tests_call`
+
+`ArchTest.Guardrails.no_functions_only_tests_call(modules_matching("Shop.**"))`
+
+A function made public so a test can reach it ties the test to the module's internals.
+
+```elixir
+defmodule Shop.Cart do
+  def total(prices), do: prices |> Enum.map(&with_tax/1) |> Enum.sum()
+
+  # ✗ public only so the test can call it
+  @doc false
+  def round_cents(amount), do: round(amount * 100) / 100
+
+  defp with_tax(price), do: price * 1.2
+end
+```
+
+```elixir
+defmodule Shop.CartTest do
+  use ExUnit.Case, async: true
+
+  test "rounds to the cent" do
+    assert Shop.Cart.round_cents(1.234) == 1.23
+  end
+end
+```
+
+<details><summary>Fixed</summary>
+
+The test checks what the cart offers its callers.
+
+```elixir
+defmodule Shop.Cart do
+  def total(prices), do: prices |> Enum.map(&with_tax/1) |> Enum.sum() |> round_cents()
+
+  defp with_tax(price), do: price * 1.2
+  defp round_cents(amount), do: round(amount * 100) / 100
+end
+```
+
+```elixir
+defmodule Shop.CartTest do
+  use ExUnit.Case, async: true
+
+  test "totals with tax, to the cent" do
+    assert Shop.Cart.total([1.01]) == 1.21
+  end
+end
+```
+
+</details>

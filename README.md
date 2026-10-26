@@ -4,7 +4,7 @@
 [![Hex.pm](https://img.shields.io/hexpm/v/arch_test.svg)](https://hex.pm/packages/arch_test)
 [![Docs](https://img.shields.io/badge/docs-hexdocs-blue.svg)](https://hexdocs.pm/arch_test)
 
-Architecture rules as tests. Enforced from bytecode.
+Architecture and design rules as tests. Enforced from bytecode.
 
 | Assertion | What it checks |
 |-----------|----------------|
@@ -26,6 +26,7 @@ Architecture rules as tests. Enforced from bytecode.
 | `ArchTest.Processes` | One interface per process, GenServers with a reason to exist, supervised processes |
 | `ArchTest.TestCode` | Tests that use their subject, mock only I/O, don't sleep, and keep async tests isolated |
 | `ArchTest.Guardrails` | No silenced warnings, no stubs, nothing public only for tests |
+| `ArchTest.Recommended` | The design rules worth holding any project to, as one test |
 | `ArchTest.Metrics` | Coupling, instability, distance from main sequence |
 | `ArchTest.Freeze` | Baseline violations for gradual adoption |
 | `ArchTest.Collector.calls/2` | Function-level call metadata with file/line |
@@ -61,7 +62,7 @@ For most teams, **ArchTest alone is enough**. You get bounded-context isolation,
 # mix.exs
 def deps do
   [
-    {:arch_test, "~> 0.3", only: :test, runtime: false}
+    {:arch_test, "~> 0.4", only: :test, runtime: false}
   ]
 end
 ```
@@ -84,6 +85,7 @@ If you use [Igniter](https://hex.pm/packages/igniter), ArchTest provides generat
 | `mix arch_test.gen.modulith` | [Bounded-context slice isolation](guides/modulith-rules.md) ([Modular Monolith Primer](https://www.kamilgrzybek.com/blog/posts/modular-monolith-primer)) |
 | `mix arch_test.gen.naming` | Naming rules — no Managers, schema namespace placement |
 | `mix arch_test.gen.conventions` | Code hygiene — no `IO.puts`, `dbg`, bare `raise` |
+| `mix arch_test.gen.design` | [Recommended design rules](#recommended-design-rules), frozen so only new violations fail |
 | `mix arch_test.gen.freeze` | [Freeze baseline for gradual adoption](guides/freezing.md) |
 
 Add Igniter as a dev dependency to use these:
@@ -493,6 +495,31 @@ end
   `{:error, :not_implemented}`.
 - **`no_functions_only_tests_call`** flags `@doc false` functions that only
   tests call: made public to be tested. Behaviour callbacks are skipped.
+
+---
+
+## Recommended design rules
+
+`ArchTest.Recommended` runs the design rules worth holding any project to —
+N+1 queries, GenServer init, process interfaces and supervision, the test
+rules and the guardrails — and reports what each finds in one test:
+
+```elixir
+test "recommended design rules" do
+  ArchTest.Freeze.freeze("recommended_design_rules", fn ->
+    ArchTest.Recommended.check(modules_matching("MyApp.**"), app: :my_app)
+  end)
+end
+```
+
+`mix arch_test.gen.design` writes this test. `except: [:tests_dont_sleep]`
+leaves a rule out. `should_be_free_of_side_effects` and `processes_hold_state`
+aren't in it: which modules form a functional core, and which processes may
+only organize code, is each project's call.
+
+[Design rule examples](guides/design-rule-examples.md) shows every design rule
+with code it flags and the fix; a test compiles each example and runs its rule
+on it.
 
 ---
 
