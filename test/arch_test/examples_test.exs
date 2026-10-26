@@ -13,9 +13,11 @@ defmodule ArchTest.ExamplesTest do
     {ArchTest.Effects, :should_be_free_of_side_effects},
     {ArchTest.Effects, :no_work_in_init},
     {ArchTest.Effects, :no_io_in_transactions},
+    {ArchTest.Effects, :writes_are_authorized},
     {ArchTest.Processes, :processes_have_one_interface},
     {ArchTest.Processes, :processes_hold_state},
     {ArchTest.Processes, :processes_are_supervised},
+    {ArchTest.Processes, :no_unbounded_waits},
     {ArchTest.TestCode, :tests_use_their_subject},
     {ArchTest.TestCode, :tests_dont_mock_pure_modules},
     {ArchTest.TestCode, :tests_dont_sleep},
@@ -35,10 +37,32 @@ defmodule ArchTest.ExamplesTest do
            def all(queryable, opts \\\\ []), do: Ecto.Repo.Queryable.all(__MODULE__, queryable, opts)
            def get!(queryable, id, opts \\\\ []), do: Ecto.Repo.Queryable.get!(__MODULE__, queryable, id, opts)
            def insert(struct, opts \\\\ []), do: Ecto.Repo.Schema.insert(__MODULE__, struct, opts)
+           def get_by!(queryable, clauses, opts \\\\ []), do: Ecto.Repo.Queryable.get_by!(__MODULE__, queryable, clauses, opts)
            def insert!(struct, opts \\\\ []), do: Ecto.Repo.Schema.insert!(__MODULE__, struct, opts)
+           def update(changeset, opts \\\\ []), do: Ecto.Repo.Schema.update(__MODULE__, changeset, opts)
            def transaction(fun, opts \\\\ []), do: Ecto.Repo.Transaction.transaction(__MODULE__, fun, opts)
          end
          """}
+
+  # `ShopWeb`, whose `use ShopWeb, :controller` makes a controller as Phoenix does: a plug with a pipeline.
+  @web {"deps/phoenix/lib/shop_web.ex",
+        """
+        defmodule ShopWeb do
+          def controller do
+            quote do
+              @behaviour Plug
+
+              def init(action), do: action
+              def call(conn, action), do: phoenix_controller_pipeline(conn, action)
+
+              defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
+              defp json(conn, data), do: Map.put(conn, :resp_body, data)
+            end
+          end
+
+          defmacro __using__(which) when is_atom(which), do: apply(__MODULE__, which, [])
+        end
+        """}
 
   # `Shop.Mailer`, a Swoosh mailer as `use Swoosh.Mailer` writes one.
   @mailer {"deps/swoosh/lib/shop/mailer.ex",
@@ -114,7 +138,7 @@ defmodule ArchTest.ExamplesTest do
     defined = files |> Map.values() |> Enum.flat_map(&modules/1)
 
     stubs =
-      for {_path, source} = stub <- [@repo, @mailer],
+      for {_path, source} = stub <- [@repo, @mailer, @web],
           modules(source) -- defined != [],
           into: %{},
           do: stub

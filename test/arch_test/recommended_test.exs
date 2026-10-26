@@ -46,15 +46,17 @@ defmodule ArchTest.RecommendedTest do
 
     assert rules == [
              {"no_queries_in_loops", 2},
+             {"no_unbounded_waits", 2},
              {"no_stubs", 4},
              {"tests_dont_sleep", 5}
            ]
   end
 
   test "leaves out the rules a project names" do
-    assert Enum.map(check(except: [:no_stubs, :tests_dont_sleep]), & &1.rule) == [
-             "no_queries_in_loops"
-           ]
+    assert Enum.map(check(except: [:no_stubs, :tests_dont_sleep, :no_unbounded_waits]), & &1.rule) ==
+             [
+               "no_queries_in_loops"
+             ]
   end
 
   test "lists its rules, leaving out the ones that need a project's own judgement" do
@@ -64,6 +66,7 @@ defmodule ArchTest.RecommendedTest do
              :no_io_in_transactions,
              :processes_have_one_interface,
              :processes_are_supervised,
+             :no_unbounded_waits,
              :tests_use_their_subject,
              :tests_dont_mock_pure_modules,
              :tests_dont_sleep,

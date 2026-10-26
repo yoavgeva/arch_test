@@ -156,6 +156,72 @@ defmodule ArchTest.ProcessesTest do
 
          defp deliver(user), do: IO.puts(user)
        end
+       """},
+      {"lib/process_fixture/waits.ex",
+       """
+       defmodule ProcessFixture.Waits do
+         def fetch(server, key), do: GenServer.call(server, {:fetch, key}, :infinity)
+         def fetch_in_time(server, key), do: GenServer.call(server, {:fetch, key})
+
+         def run_all(funs), do: funs |> Enum.map(&Task.async/1) |> Task.await_many(:infinity)
+
+         def crawl(urls) do
+           urls
+           |> Task.async_stream(&String.upcase/1, timeout: :infinity, max_concurrency: 4)
+           |> Enum.to_list()
+         end
+
+         def ask(pid) do
+           send(pid, {:ping, self()})
+
+           receive do
+             :pong -> :ok
+           end
+         end
+
+         def ask_in_time(pid) do
+           send(pid, {:ping, self()})
+
+           receive do
+             :pong -> :ok
+           after
+             5_000 -> {:error, :timeout}
+           end
+         end
+
+         def loop(state) do
+           receive do
+             {:put, value} ->
+               loop(value)
+
+             {:get, from} ->
+               send(from, state)
+               loop(state)
+           end
+         end
+
+         def guard(worker, ref) do
+           receive do
+             {:result, ^worker, result} -> result
+             {:DOWN, ^ref, :process, ^worker, reason} -> {:error, reason}
+           end
+         end
+
+         def serve(state) do
+           receive do
+             message -> handle(state, message)
+           end
+         end
+
+         defp handle(_state, {:put, value}), do: serve(value)
+         defp handle(state, _message), do: serve(state)
+
+         def connect(host), do: :gen_tcp.connect(host, 80, [:binary])
+         def read(socket), do: :gen_tcp.recv(socket, 0)
+         def read_in_time(socket), do: :gen_tcp.recv(socket, 0, 5_000)
+         def get(url), do: :httpc.request(url)
+         def get_in_time(url), do: :httpc.request(:get, {url, []}, [timeout: 5_000], [])
+       end
        """}
     ])
 
@@ -211,6 +277,36 @@ defmodule ArchTest.ProcessesTest do
 
       assert hd(violations).fix ==
                "start it under a supervisor, such as Task.Supervisor.start_child/2, or add it to the supervision tree"
+    end
+  end
+
+  describe "no_unbounded_waits/2" do
+    test "flags waits with no limit, and passes ones with a timeout and a process's own receive loop" do
+      violations =
+        capture(&Processes.no_unbounded_waits/2)
+        |> Enum.filter(&(&1.module == ProcessFixture.Waits))
+
+      stuck =
+        ": if the answer never comes, this process waits forever, and so does everything waiting on it"
+
+      assert Enum.map(violations, &{&1.caller_function, &1.line, &1.message}) == [
+               {{:fetch, 2}, 2, "waits for GenServer.call/3 with timeout :infinity" <> stuck},
+               {{:run_all, 1}, 5, "waits for Task.await_many/2 with timeout :infinity" <> stuck},
+               {{:crawl, 1}, 9,
+                "waits for Task.async_stream/3 with `timeout: :infinity`" <> stuck},
+               {{:ask, 1}, 16, "waits in a receive with no after" <> stuck},
+               {{:connect, 1}, 58,
+                "waits for :gen_tcp.connect/3, which has no timeout by default" <> stuck},
+               {{:read, 1}, 59,
+                "waits for :gen_tcp.recv/2, which has no timeout by default" <> stuck},
+               {{:get, 1}, 61,
+                "waits for :httpc.request/1, which has no timeout by default" <> stuck}
+             ]
+
+      assert Enum.map(violations, & &1.fix) |> Enum.uniq() == [
+               "give it a timeout, and handle what happens when it passes",
+               "add an after clause that gives up, and handle that"
+             ]
     end
   end
 

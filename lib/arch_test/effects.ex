@@ -30,6 +30,10 @@ defmodule ArchTest.Effects do
         test "transactions stay in the database" do
           no_io_in_transactions(modules_matching("MyApp.**"), app: :my_app)
         end
+
+        test "writes are authorized" do
+          writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app, policy: MyApp.Policy)
+        end
       end
 
   Each violation names the file and line, the path to the effect, and how to fix it.
@@ -52,6 +56,10 @@ defmodule ArchTest.Effects do
   @work [:db_read, :db_write, :http, :network, :mail, :file, :system]
   # What a rollback can't undo, and what a transaction shouldn't wait on.
   @outside [:http, :network, :mail, :publish]
+  # Libraries that check permissions.
+  @policies [Bodyguard, Canada.Can]
+  # A controller's functions that Plug and Phoenix call, rather than a route.
+  @plumbing [:init, :call, :action, :phoenix_controller_pipeline]
   @outside_verbs %{
     http: "makes an HTTP request",
     network: "uses the network",
@@ -212,6 +220,51 @@ defmodule ArchTest.Effects do
   end
 
   @doc """
+  Asserts that every endpoint in `subject` that writes to the database checks who's asking.
+
+  Endpoints are controller actions, a LiveView's or LiveComponent's `handle_event/3` and a channel's `handle_in/3`.
+  One that writes, directly or through the functions it calls, passes when:
+
+  - it gives the user asking to the call that writes: the current user or scope, as `conn.assigns.current_user`,
+    `socket.assigns.current_scope`, `Guardian.Plug.current_resource(conn)` or a value made from them, for the code
+    it calls to scope the change to;
+  - or it, or one of its controller's plugs, calls a policy: `Bodyguard`, `Canada`, or a module given as `policy:`.
+
+  Otherwise anyone who can reach the endpoint can change any record whose id they send.
+
+  ## Options
+
+  - `:policy` — modules that check permissions, such as `MyApp.Policy` or a plug like `MyAppWeb.Plugs.RequireAdmin`
+  """
+  @spec writes_are_authorized(ModuleSet.t(), keyword()) :: :ok
+  def writes_are_authorized(%ModuleSet{} = subject, opts \\ []) do
+    configured = opts |> Keyword.get(:policy, []) |> List.wrap()
+    policies = @policies ++ configured
+    {modules, code, effects} = Rules.analyze(subject, opts)
+    routes = routes(code, opts)
+
+    violations =
+      for module <- modules,
+          endpoint <- endpoints(code, module),
+          not checks_policy?(code, endpoint, policies),
+          not routed_through_policy?(routes, endpoint, policies),
+          {call, path} <- List.wrap(unchecked_write(code, effects, endpoint)) do
+        Rules.violation(code, "writes_are_authorized", endpoint,
+          line: call.line,
+          callee: call.target,
+          message:
+            "writes to the database through #{Rules.name(call.target, module)}" <>
+              "#{Rules.reaching(path, call.target, module)}: nothing checks that the user asking may make this change",
+          fix:
+            "pass the current user or scope to the code that writes, and scope the change to it, or check " <>
+              "#{policy_names(configured)} first"
+        )
+      end
+
+    Rules.report(violations, "writes_are_authorized")
+  end
+
+  @doc """
   Asserts that no GenServer in `subject` does I/O in `init/1`.
 
   I/O is the database, HTTP, the network, files or the operating system, directly or through the functions
@@ -243,6 +296,133 @@ defmodule ArchTest.Effects do
 
     Rules.report(violations, "no_work_in_init")
   end
+
+  # A controller's actions, a LiveView's or LiveComponent's events, and a channel's incoming messages.
+  defp endpoints(code, module) do
+    behaviours = Code.behaviours(code, module)
+
+    controller? =
+      Plug in behaviours and
+        Map.has_key?(code.functions, {module, :phoenix_controller_pipeline, 2})
+
+    for {{^module, name, arity} = key, info} <- Code.functions_of(code, module),
+        not info.injected,
+        endpoint?(name, arity, info.kind, behaviours, controller?),
+        do: key
+  end
+
+  defp endpoint?(:handle_event, 3, _kind, behaviours, _controller?),
+    do: Phoenix.LiveView in behaviours or Phoenix.LiveComponent in behaviours
+
+  defp endpoint?(:handle_in, 3, _kind, behaviours, _controller?),
+    do: Phoenix.Channel in behaviours
+
+  defp endpoint?(name, 2, :def, _behaviours, true), do: name not in @plumbing
+  defp endpoint?(_name, _arity, _kind, _behaviours, _controller?), do: false
+
+  # Whether the endpoint, or its controller's plug pipeline, calls a policy, directly or through what it calls.
+  defp checks_policy?(code, {module, _, _} = endpoint, policies) do
+    start =
+      Enum.filter(
+        [endpoint, {module, :phoenix_controller_pipeline, 2}],
+        &Map.has_key?(code.functions, &1)
+      )
+
+    calls_module?(start, MapSet.new(start), policies, code)
+  end
+
+  defp calls_module?([], _seen, _modules, _code), do: false
+
+  defp calls_module?([key | rest], seen, modules, code) do
+    calls = code.functions[key].calls
+
+    if Enum.any?(calls, fn %{target: {module, _, _}} -> module in modules end) do
+      true
+    else
+      next =
+        for %{target: target} <- calls,
+            Map.has_key?(code.functions, target),
+            not MapSet.member?(seen, target),
+            uniq: true,
+            do: target
+
+      calls_module?(next ++ rest, Enum.into(next, seen), modules, code)
+    end
+  end
+
+  # Every route to a controller action, as the router functions of the pipelines it goes through, read from the
+  # routers in scope.
+  defp routes(code, opts) do
+    routers = Enum.filter(code.scope, &String.ends_with?(Atom.to_string(&1), "Router"))
+    router_code = Code.load(routers, opts)
+
+    by_action =
+      for {router, %{routes: routes}} <- router_code.modules, route <- routes, reduce: %{} do
+        acc ->
+          pipelines = Enum.map(route.pipe_through, &{router, &1, 2})
+          Map.update(acc, {route.controller, route.action}, [pipelines], &[pipelines | &1])
+      end
+
+    {by_action, router_code}
+  end
+
+  # Whether every route to a controller action goes through a pipeline that calls a policy, as `pipe_through
+  # :require_admin` does when its plug is one.
+  defp routed_through_policy?({by_action, router_code}, {module, name, _arity}, policies) do
+    case Map.get(by_action, {module, name}, []) do
+      [] ->
+        false
+
+      routes ->
+        Enum.all?(routes, fn pipelines ->
+          start = Enum.filter(pipelines, &Map.has_key?(router_code.functions, &1))
+          calls_module?(start, MapSet.new(start), policies, router_code)
+        end)
+    end
+  end
+
+  # The first call that writes to the database without the user asking, in the endpoint, the functions of its module
+  # it calls, and the functions it gives the request to, which can read the user asking from it. A call given the
+  # user asking is made on their behalf, along with everything it calls. A write found past a function of another
+  # module is reported at the endpoint's call that led there.
+  defp unchecked_write(code, effects, {module, _, _} = endpoint),
+    do: unchecked_write([{endpoint, nil}], MapSet.new([endpoint]), module, code, effects)
+
+  defp unchecked_write([], _seen, _module, _code, _effects), do: nil
+
+  defp unchecked_write([{key, origin} | rest], seen, module, code, effects) do
+    info = code.functions[key]
+    on_behalf = MapSet.new(info.actors.on_behalf)
+    requests = MapSet.new(info.actors.requests)
+
+    {followed, outside} =
+      info.calls
+      |> Enum.reject(&MapSet.member?(on_behalf, {&1.target, &1.line}))
+      |> Enum.split_with(fn %{target: {callee, _, _} = target} = call ->
+        Map.has_key?(code.functions, target) and
+          (callee == module or MapSet.member?(requests, {target, call.line}))
+      end)
+
+    case first_effect(outside, [:db_write], effects) do
+      nil ->
+        next =
+          for %{target: {callee, _, _} = target} = call <- followed,
+              not MapSet.member?(seen, target),
+              uniq: true,
+              do: {target, origin || if(callee == module, do: nil, else: call)}
+
+        unchecked_write(next ++ rest, Enum.into(next, seen, &elem(&1, 0)), module, code, effects)
+
+      {call, path} when origin == nil ->
+        {call, path}
+
+      {_call, path} ->
+        {origin, [Rules.step(origin) | path]}
+    end
+  end
+
+  defp policy_names([]), do: "a policy"
+  defp policy_names(policies), do: Enum.map_join(policies, " or ", &inspect/1)
 
   # A call that opens a transaction: Ecto.Multi.run, or transaction/transact on a repo, which declares the Ecto.Repo
   # behaviour or reaches Ecto.Repo.Transaction, as a facade over one does.

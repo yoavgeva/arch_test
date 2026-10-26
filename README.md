@@ -22,8 +22,8 @@ Architecture and design rules as tests. Enforced from bytecode.
 | `define_onion` + `enforce_onion_rules` | Onion / hexagonal architecture |
 | `define_slices` + `enforce_isolation` | Modulith bounded-context isolation |
 | `ArchTest.Conventions` | Ban `IO.puts`, `dbg`, bare `raise`, and more |
-| `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1`, I/O in transactions |
-| `ArchTest.Processes` | One interface per process, GenServers with a reason to exist, supervised processes |
+| `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1`, I/O in transactions, authorized writes |
+| `ArchTest.Processes` | One interface per process, GenServers with a reason to exist, supervised processes, waits with limits |
 | `ArchTest.TestCode` | Tests that use their subject, mock only I/O, don't sleep, and keep async tests isolated |
 | `ArchTest.Guardrails` | No silenced warnings, no stubs, nothing public only for tests, no swallowed errors |
 | `ArchTest.Recommended` | The design rules worth holding any project to, as one test |
@@ -340,6 +340,10 @@ defmodule MyApp.EffectsTest do
   test "transactions stay in the database" do
     no_io_in_transactions(modules_matching("MyApp.**"), app: :my_app)
   end
+
+  test "writes are authorized" do
+    writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app, policy: MyApp.Policy)
+  end
 end
 ```
 
@@ -378,6 +382,12 @@ they call. A rollback can't take them back, and the transaction holds its
 connection while they wait. Do them after the commit, or through an outbox or
 Oban job.
 
+**`writes_are_authorized`** flags controller actions, LiveView events and
+channel messages that write to the database with nothing tying the change to
+the user asking: the call that writes isn't given the current user or scope,
+and no policy, plug or router pipeline checks permissions. Leave public
+endpoints such as sign-up and log-in out of the subject.
+
 The rules read the code from debug info, after macro expansion, so aliases,
 imports and `use` are resolved. See the [effects guide](guides/effects.md) for
 what counts as an effect and as a loop.
@@ -406,6 +416,10 @@ defmodule MyApp.ProcessesTest do
   test "processes are supervised" do
     processes_are_supervised(modules_matching("MyApp.**"), app: :my_app)
   end
+
+  test "waits have limits" do
+    no_unbounded_waits(modules_matching("MyApp.**"), app: :my_app)
+  end
 end
 ```
 
@@ -422,6 +436,11 @@ end
   `GenServer.start/2` and `Agent.start/1`: nothing notices when such a process
   crashes, and shutdown doesn't stop it. Use `Task.Supervisor.start_child/2` or
   the supervision tree.
+- **`no_unbounded_waits`** flags `GenServer.call/3`, `Task.await/2` and the
+  like given `:infinity`, options such as `timeout: :infinity`, `receive`
+  without `after`, and `:gen_tcp`, `:ssl` and `:httpc` calls that wait forever
+  by default. A process's own receive loop, and a receive that also takes the
+  `:DOWN` of the process it waits on, pass.
 
 See the [processes guide](guides/processes.md).
 
@@ -520,7 +539,7 @@ end
 
 `ArchTest.Recommended` runs the design rules worth holding any project to —
 N+1 queries, GenServer init, I/O in transactions, process interfaces and
-supervision, the test rules and the guardrails — and reports what each finds in one test:
+supervision, waits with limits, the test rules and the guardrails — and reports what each finds in one test:
 
 ```elixir
 test "recommended design rules" do

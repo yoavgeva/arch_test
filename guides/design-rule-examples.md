@@ -167,6 +167,66 @@ end
 
 </details>
 
+### `writes_are_authorized`
+
+`ArchTest.Effects.writes_are_authorized(modules_matching("ShopWeb.**"))`
+
+An endpoint that changes a record by the id it's sent lets anyone change anyone's record.
+
+```elixir
+defmodule ShopWeb.OrderController do
+  use ShopWeb, :controller
+  alias Shop.Orders
+
+  # ✗ cancels whichever order the id names, whoever asks
+  def cancel(conn, %{"id" => id}) do
+    {:ok, order} = Orders.cancel_order(id)
+    json(conn, order)
+  end
+end
+```
+
+```elixir
+defmodule Shop.Orders do
+  alias Shop.{Order, Repo}
+
+  def cancel_order(id), do: Order |> Repo.get!(id) |> Order.cancel() |> Repo.update()
+end
+```
+
+```elixir
+defmodule Shop.Order do
+  defstruct [:id, :user_id, :status]
+
+  def cancel(order), do: %{order | status: :cancelled}
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule ShopWeb.OrderController do
+  use ShopWeb, :controller
+  alias Shop.Orders
+
+  def cancel(conn, %{"id" => id}) do
+    {:ok, order} = Orders.cancel_order(conn.assigns.current_user, id)
+    json(conn, order)
+  end
+end
+```
+
+```elixir
+defmodule Shop.Orders do
+  alias Shop.{Order, Repo}
+
+  def cancel_order(user, id),
+    do: Order |> Repo.get_by!(id: id, user_id: user.id) |> Order.cancel() |> Repo.update()
+end
+```
+
+</details>
+
 ## Processes
 
 ### `processes_have_one_interface`
@@ -275,6 +335,46 @@ defmodule Shop.Notifier do
   def notify(user), do: Task.Supervisor.start_child(Shop.TaskSupervisor, fn -> deliver(user) end)
 
   defp deliver(user), do: IO.puts("Your order shipped, #{user}")
+end
+```
+
+</details>
+
+### `no_unbounded_waits`
+
+`ArchTest.Processes.no_unbounded_waits(modules_matching("Shop.**"))`
+
+One supplier that never answers holds up every price, and every request waiting for them.
+
+```elixir
+defmodule Shop.Prices do
+  def fetch_all(suppliers) do
+    suppliers
+    # ✗ waits as long as the slowest supplier takes, forever if it hangs
+    |> Task.async_stream(&Shop.Suppliers.price/1, timeout: :infinity)
+    |> Enum.map(fn {:ok, price} -> price end)
+  end
+end
+```
+
+```elixir
+defmodule Shop.Suppliers do
+  def price(supplier), do: Req.get!(supplier.url).body
+end
+```
+
+<details><summary>Fixed</summary>
+
+```elixir
+defmodule Shop.Prices do
+  def fetch_all(suppliers) do
+    suppliers
+    |> Task.async_stream(&Shop.Suppliers.price/1, timeout: 5_000, on_timeout: :kill_task)
+    |> Enum.flat_map(fn
+      {:ok, price} -> [price]
+      {:exit, :timeout} -> []
+    end)
+  end
 end
 ```
 

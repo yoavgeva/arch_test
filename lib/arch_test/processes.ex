@@ -2,7 +2,7 @@ defmodule ArchTest.Processes do
   @moduledoc """
   Rules about processes, from Elixir's [process-related anti-patterns](https://hexdocs.pm/elixir/process-anti-patterns.html):
   one module owns each process's messages, processes are there for runtime reasons, and long-lived processes run
-  under a supervisor.
+  under a supervisor. And one more: no process waits forever.
 
   ## Usage
 
@@ -21,6 +21,10 @@ defmodule ArchTest.Processes do
 
         test "processes are supervised" do
           processes_are_supervised(modules_matching("MyApp.**"), app: :my_app)
+        end
+
+        test "waits have limits" do
+          no_unbounded_waits(modules_matching("MyApp.**"), app: :my_app)
         end
       end
 
@@ -170,6 +174,80 @@ defmodule ArchTest.Processes do
 
     Rules.report(violations, "processes_are_supervised")
   end
+
+  @doc """
+  Asserts that no function in `subject` waits with no limit.
+
+  A wait with no limit turns a slow or dead process, server or peer into a stuck caller, and every process waiting
+  on that caller gets stuck too. Flags:
+
+  - `:infinity` given as a timeout: to `GenServer.call/3`, `Task.await/2`, `Task.await_many/2`, `Task.yield/2`,
+    `Agent.get/3`, `:erpc.call/5` and the like, or as a keyword option named for a timeout, such as
+    `Task.async_stream(items, fun, timeout: :infinity)` or `Req.get(url, receive_timeout: :infinity)`;
+  - calls that wait with no limit unless given one: `:gen_tcp.connect/3`, `:gen_tcp.recv/2`, `:gen_udp.recv/2`,
+    `:ssl.connect/2`, `:ssl.recv/2`, `:ssl.handshake/1`, and `:httpc.request/1,2,4` without a `timeout` HTTP option;
+  - a `receive` with no `after`, or `after :infinity`. A process's own loop, whose clauses call the function again
+    to wait for its next message, passes.
+
+  `GenServer.call/2`, `Task.await/1`, Req, Finch and HTTPoison have default timeouts, and pass.
+  """
+  @spec no_unbounded_waits(ModuleSet.t(), keyword()) :: :ok
+  def no_unbounded_waits(%ModuleSet{} = subject, opts \\ []) do
+    {modules, code, _effects} = Rules.analyze(subject, opts)
+
+    violations =
+      for module <- modules,
+          {key, info} <- Code.functions_of(code, module),
+          not info.injected,
+          wait <- info.waits,
+          not loops?(wait, key, code) do
+        Rules.violation(code, "no_unbounded_waits", key,
+          line: wait.line,
+          callee: wait.target,
+          message:
+            waiting(wait, module) <>
+              ": if the answer never comes, this process waits forever, and so does everything waiting on it",
+          fix:
+            if(wait.how == :receive,
+              do: "add an after clause that gives up, and handle that",
+              else: "give it a timeout, and handle what happens when it passes"
+            )
+        )
+      end
+
+    Rules.report(violations, "no_unbounded_waits")
+  end
+
+  # Whether a receive's clauses lead back to its function, through the module's functions: a process's loop.
+  defp loops?(%{how: :receive, next: next}, key, code),
+    do: leads_to?(next, MapSet.new(next), key, code)
+
+  defp loops?(_wait, _key, _code), do: false
+
+  defp leads_to?([], _seen, _key, _code), do: false
+  defp leads_to?([key | _rest], _seen, key, _code), do: true
+
+  defp leads_to?([{module, _, _} = current | rest], seen, key, code) do
+    next =
+      for %{target: {^module, _, _} = target} <- code.functions[current].calls,
+          Map.has_key?(code.functions, target),
+          not MapSet.member?(seen, target),
+          uniq: true,
+          do: target
+
+    leads_to?(rest ++ next, Enum.into(next, seen), key, code)
+  end
+
+  defp waiting(%{how: :receive}, _module), do: "waits in a receive with no after"
+
+  defp waiting(%{how: :infinity, target: target}, module),
+    do: "waits for #{Rules.name(target, module)} with timeout :infinity"
+
+  defp waiting(%{how: :option, target: target, option: option}, module),
+    do: "waits for #{Rules.name(target, module)} with `#{option}: :infinity`"
+
+  defp waiting(%{how: :default, target: target}, module),
+    do: "waits for #{Rules.name(target, module)}, which has no timeout by default"
 
   # A process that starts or opens something in init/1, or cleans up in its own terminate/2, owns that resource's
   # lifetime: a runtime reason to be a process, as a GenServer holding a client connection is.

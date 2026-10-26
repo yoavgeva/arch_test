@@ -6,7 +6,7 @@ defmodule ArchTest.Code do
   # `MyApp.Repo.get!/2`. Reading starts at the modules a rule checks and follows their calls into the other
   # modules in scope, so a rule reads only the code it can reach.
 
-  alias ArchTest.Code.{Errors, Walker}
+  alias ArchTest.Code.{Actors, Errors, Waits, Walker}
   alias ArchTest.Collector
 
   defstruct modules: %{}, functions: %{}, scope: MapSet.new()
@@ -38,15 +38,19 @@ defmodule ArchTest.Code do
           swallows: [Errors.swallow()],
           discards: [{key(), pos_integer() | nil}],
           tails: Errors.tails(),
-          dynamic: boolean()
+          dynamic: boolean(),
+          actors: Actors.calls(),
+          waits: [Waits.wait()]
         }
   @type module_info :: %{
           file: String.t() | nil,
           behaviours: [module()],
           impls: MapSet.t({atom(), arity()}),
           hidden: MapSet.t({atom(), arity()}),
-          callbacks: MapSet.t({atom(), arity()})
+          callbacks: MapSet.t({atom(), arity()}),
+          routes: [route()]
         }
+  @type route :: %{controller: module(), action: atom(), pipe_through: [atom()]}
   @type t :: %__MODULE__{
           modules: %{module() => module_info()},
           functions: %{key() => function_info()},
@@ -122,7 +126,7 @@ defmodule ArchTest.Code do
           Map.put(
             code.modules,
             module,
-            Map.take(read, [:file, :behaviours, :impls, :hidden, :callbacks])
+            Map.take(read, [:file, :behaviours, :impls, :hidden, :callbacks, :routes])
           ),
         functions: Map.merge(code.functions, read.functions)
     }
@@ -194,10 +198,40 @@ defmodule ArchTest.Code do
          impls: MapSet.new(Map.get(info, :impls, []), &elem(&1, 0)),
          hidden: hidden_in(binary),
          callbacks: callbacks_in(binary),
-         functions: functions(module, info.definitions)
+         functions: functions(module, info.definitions),
+         routes: routes_in(info.definitions)
        }}
     else
       _ -> :error
+    end
+  end
+
+  # A Phoenix router's routes, from the clauses of its `__match_route__/3`: each one's controller, action, and the
+  # pipelines it goes through, which the router defines as functions of the same names.
+  defp routes_in(definitions) do
+    for {{:__match_route__, 3}, _kind, _meta, clauses} <- definitions,
+        {_meta, _args, _guards, body} <- clauses,
+        route <- route_maps(body),
+        do: route
+  end
+
+  defp route_maps(body) do
+    body
+    |> Macro.prewalk([], fn
+      {:%{}, _, pairs} = node, acc when is_list(pairs) -> {node, List.wrap(route(pairs)) ++ acc}
+      node, acc -> {node, acc}
+    end)
+    |> elem(1)
+  end
+
+  defp route(pairs) do
+    with true <- Keyword.keyword?(pairs),
+         controller when is_atom(controller) and controller != nil <- pairs[:plug],
+         action when is_atom(action) and action != nil <- pairs[:plug_opts],
+         pipelines when is_list(pipelines) <- pairs[:pipe_through] do
+      %{controller: controller, action: action, pipe_through: pipelines}
+    else
+      _ -> nil
     end
   end
 
@@ -266,7 +300,9 @@ defmodule ArchTest.Code do
          swallows: Errors.swallows(clauses, module, locals),
          discards: Errors.discards(clauses, module, locals),
          tails: Errors.tails(clauses, module, locals),
-         dynamic: Errors.dynamic?(clauses)
+         dynamic: Errors.dynamic?(clauses),
+         actors: Actors.calls(clauses, module, locals),
+         waits: Waits.unbounded(clauses, module, name, arity, locals)
        }}
     end
   end

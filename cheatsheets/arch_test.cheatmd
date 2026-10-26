@@ -242,6 +242,13 @@ no_work_in_init(modules_matching("MyApp.**"), app: :my_app)
 
 # no HTTP, email or PubSub inside Repo.transaction/1 or Ecto.Multi.run/3
 no_io_in_transactions(modules_matching("MyApp.**"), app: :my_app)
+
+# endpoints that write pass the current user or check a policy
+writes_are_authorized(
+  modules_matching("MyAppWeb.**") |> excluding("MyAppWeb.UserSessionController"),
+  app: :my_app,
+  policy: [MyApp.Policy, MyAppWeb.Plugs.RequireAdmin]
+)
 ```
 
 ## Processes
@@ -258,6 +265,9 @@ processes_hold_state(modules_matching("MyApp.**"), app: :my_app)
 
 # no spawn/1, Task.start/1, GenServer.start/2 outside a supervisor
 processes_are_supervised(modules_matching("MyApp.**"), app: :my_app)
+
+# no :infinity timeouts, receive without after, :gen_tcp.recv/2...
+no_unbounded_waits(modules_matching("MyApp.**"), app: :my_app)
 ```
 
 ## Test Code

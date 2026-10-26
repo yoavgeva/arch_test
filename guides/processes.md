@@ -1,7 +1,8 @@
 # Processes
 
 `ArchTest.Processes` checks three of Elixir's
-[process-related anti-patterns](https://hexdocs.pm/elixir/process-anti-patterns.html). Like `ArchTest.Effects`, it
+[process-related anti-patterns](https://hexdocs.pm/elixir/process-anti-patterns.html), and that no process waits
+forever. Like `ArchTest.Effects`, it
 reads your code from the BEAM files' debug info, after macro expansion, so aliases and `use GenServer` are resolved.
 
 ```elixir
@@ -20,6 +21,10 @@ defmodule MyApp.ProcessesTest do
 
   test "processes are supervised" do
     processes_are_supervised(modules_matching("MyApp.**"), app: :my_app)
+  end
+
+  test "waits have limits" do
+    no_unbounded_waits(modules_matching("MyApp.**"), app: :my_app)
   end
 end
 ```
@@ -86,3 +91,33 @@ def notify(user), do: Task.Supervisor.start_child(MyApp.TaskSupervisor, fn -> de
 `Agent.start/1,2`. `Task.async/1` with `Task.await/2` and the `start_link` functions are fine: the caller is linked
 to the process and waits for it, or a supervisor starts it. So is a module's own `start` or `start_link` function,
 such as a library's `start/1` calling `GenServer.start/2`: its caller decides how the process is supervised.
+
+---
+
+## 4. Waits have limits
+
+A wait with no limit turns a slow or dead process, server or peer into a stuck caller, and everything waiting on the
+caller gets stuck too.
+
+```elixir
+# flagged
+suppliers |> Task.async_stream(&price/1, timeout: :infinity) |> Enum.map(fn {:ok, price} -> price end)
+
+# fixed
+suppliers
+|> Task.async_stream(&price/1, timeout: 5_000, on_timeout: :kill_task)
+|> Enum.flat_map(fn {:ok, price} -> [price]; {:exit, :timeout} -> [] end)
+```
+
+`no_unbounded_waits/2` flags:
+
+- `:infinity` given as a timeout: to `GenServer.call/3`, `Task.await/2`, `Task.await_many/2`, `Task.yield/2`,
+  `Agent.get/3`, `:erpc.call/5` and the like, or as an option named for a timeout, such as `timeout: :infinity` or
+  `receive_timeout: :infinity`;
+- calls that wait forever unless given a limit: `:gen_tcp.connect/3`, `:gen_tcp.recv/2`, `:ssl.recv/2`,
+  `:ssl.handshake/1`, and `:httpc.request/1,2,4` without a `timeout` HTTP option;
+- a `receive` with no `after`.
+
+It passes a `receive` that also takes the `:DOWN` of the process it waits on, as `GenServer.call/2` does, and a
+process's own loop, whose clauses call back into it to wait for the next message. `GenServer.call/2`, `Task.await/1`,
+Req, Finch and HTTPoison have default timeouts.

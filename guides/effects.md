@@ -31,6 +31,10 @@ defmodule MyApp.EffectsTest do
   test "transactions stay in the database" do
     no_io_in_transactions(modules_matching("MyApp.**"), app: :my_app)
   end
+
+  test "writes are authorized" do
+    writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app, policy: MyApp.Policy)
+  end
 end
 ```
 
@@ -148,7 +152,53 @@ do it after the commit.
 
 ---
 
-## 6. What counts as an effect
+## 6. Writes are authorized
+
+`writes_are_authorized/2` flags an endpoint that writes to the database, directly or through what it calls, with
+nothing tying the change to the user asking. Anyone who can reach it can change any record whose id they send: the
+hole AI-written endpoints leave most.
+
+```elixir
+# flagged: cancels whichever order the id names
+def cancel(conn, %{"id" => id}) do
+  {:ok, order} = Orders.cancel_order(id)
+  json(conn, order)
+end
+
+# fixed: the context scopes the change to the current user
+def cancel(conn, %{"id" => id}) do
+  {:ok, order} = Orders.cancel_order(conn.assigns.current_user, id)
+  json(conn, order)
+end
+```
+
+Endpoints are controller actions, a LiveView's or LiveComponent's `handle_event/3` and a channel's `handle_in/3`. A
+write passes when:
+
+- **it's made on behalf of the user asking**: the call that leads to it is given the current user or scope, as
+  `conn.assigns.current_user`, `socket.assigns.current_scope`, `Guardian.Plug.current_resource(conn)`, a
+  `current_user(conn)` helper, or a value made from them, such as `user.id`. This is how Phoenix's scopes and most
+  contexts authorize: the query only finds the user's own records. A call given `conn` or `socket` is followed, since
+  it can read the user from them;
+- **or a policy is checked**: the endpoint, one of its controller's plugs, or a pipeline every route to the action
+  goes through, as `pipe_through :require_admin` does, calls `Bodyguard`, `Canada`, or a module given as `policy:`:
+
+```elixir
+writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app,
+  policy: [MyApp.Policy, MyAppWeb.Plugs.RequireAdmin])
+```
+
+Some endpoints are public by design: sign-up, log-in, password reset, webhooks verified by a signature. The secret in
+the request is their check. Leave them out of the subject:
+
+```elixir
+modules_matching("MyAppWeb.**")
+|> excluding(["MyAppWeb.UserSessionController", "MyAppWeb.UserRegistrationLive", "MyAppWeb.WebhookController"])
+```
+
+---
+
+## 7. What counts as an effect
 
 An effect is a call to a library that touches the outside world, or to a project function that makes one:
 

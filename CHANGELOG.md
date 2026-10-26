@@ -21,7 +21,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two effect kinds, `:mail` (Swoosh, Bamboo, `:gen_smtp_client`) and `:publish`
   (`Phoenix.PubSub` and channel broadcasts, AMQP, Kafka), which
   `should_be_free_of_side_effects/2` accepts in `allow:`.
-- Both new rules are part of `ArchTest.Recommended`.
+- `ArchTest.Effects.writes_are_authorized/2` flags controller actions,
+  LiveView events and channel messages that write to the database with
+  nothing tying the change to the user asking: the call that writes isn't
+  given the current user or scope, and no policy, plug or router pipeline
+  checks permissions. `policy:` names a project's policy modules and plugs.
+- `ArchTest.Processes.no_unbounded_waits/2` flags `:infinity` timeouts,
+  `receive` without `after`, and `:gen_tcp`, `:ssl` and `:httpc` calls that
+  wait forever by default. A process's own receive loop, and a receive that
+  takes the `:DOWN` of the process it waits on, pass.
+- `no_io_in_transactions/2`, `no_swallowed_errors/2` and
+  `no_unbounded_waits/2` are part of `ArchTest.Recommended`;
+  `writes_are_authorized/2`, which needs a project's policy and public
+  endpoints, isn't.
 
 ### Changed
 

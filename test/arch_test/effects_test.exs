@@ -8,6 +8,7 @@ defmodule ArchTest.EffectsTest do
   @core "lib/effects_fixture/core.ex"
   @servers "lib/effects_fixture/servers.ex"
   @billing "lib/effects_fixture/billing.ex"
+  @web "lib/effects_fixture/web.ex"
   @query_fix "load what the loop needs with one query before it, such as Repo.all with `where: x.id in ^ids`, " <>
                "or Repo.preload"
 
@@ -21,6 +22,8 @@ defmodule ArchTest.EffectsTest do
          def all(queryable, opts \\\\ []), do: Ecto.Repo.Queryable.all(__MODULE__, queryable, opts)
          def get!(queryable, id, opts \\\\ []), do: Ecto.Repo.Queryable.get!(__MODULE__, queryable, id, opts)
          def insert(struct, opts \\\\ []), do: Ecto.Repo.Schema.insert(__MODULE__, struct, opts)
+         def update(changeset, opts \\\\ []), do: Ecto.Repo.Schema.update(__MODULE__, changeset, opts)
+         def delete(struct, opts \\\\ []), do: Ecto.Repo.Schema.delete(__MODULE__, struct, opts)
          def query!(sql, params), do: Ecto.Adapters.SQL.query!(__MODULE__, sql, params)
          def transaction(fun, opts \\\\ []), do: Ecto.Repo.Transaction.transaction(__MODULE__, fun, opts)
        end
@@ -91,6 +94,159 @@ defmodule ArchTest.EffectsTest do
          defp update_sql(table), do: "UPDATE \#{table} SET n = n + 1 WHERE id = $1"
 
          defp load(id), do: Repo.get!(:orders, id)
+       end
+       """},
+      {@web,
+       """
+       defmodule EffectsFixture.Posts do
+         alias EffectsFixture.Repo
+
+         def get_post(id), do: Repo.get!(:post, id)
+         def update_post(id, attrs), do: Repo.update({:post, id, attrs})
+         def update_own_post(user, id, attrs), do: Repo.update({:post, user.id, id, attrs})
+       end
+
+       defmodule EffectsFixture.Policy do
+         def authorize!(user, action, id), do: if(user.admin, do: :ok, else: raise("can't \#{action} \#{id}"))
+       end
+
+       defmodule EffectsFixture.PostController do
+         @behaviour Plug
+         alias EffectsFixture.{Policy, Posts}
+
+         def init(action), do: action
+         def call(conn, action), do: phoenix_controller_pipeline(conn, action)
+
+         def update(conn, %{"id" => id, "post" => attrs}) do
+           {:ok, post} = Posts.update_post(id, attrs)
+           Map.put(conn, :post, post)
+         end
+
+         def edit(conn, %{"id" => id, "post" => attrs}) do
+           user = conn.assigns.current_user
+           {:ok, post} = Posts.update_own_post(user, id, attrs)
+           Map.put(conn, :post, post)
+         end
+
+         def publish(conn, %{"id" => id}) do
+           Policy.authorize!(conn.assigns.current_user, :publish, id)
+           {:ok, post} = Posts.update_post(id, %{published: true})
+           Map.put(conn, :post, post)
+         end
+
+         def show(conn, %{"id" => id}), do: Map.put(conn, :post, Posts.get_post(id))
+
+         def archive(conn, %{"id" => id}) do
+           case get_current_user(conn) do
+             nil -> conn
+             user -> Map.put(conn, :post, Posts.update_own_post(user, id, %{archived: true}))
+           end
+         end
+
+         def pin(conn, %{"id" => id}) do
+           user_id = user_id_from_conn(conn)
+           Map.put(conn, :post, Posts.update_own_post(%{id: user_id}, id, %{pinned: true}))
+         end
+
+         defp get_current_user(conn), do: conn.assigns[:current_user]
+         defp user_id_from_conn(conn), do: conn.assigns.user_id
+
+         defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
+       end
+
+       defmodule EffectsFixture.PostLive do
+         @behaviour Phoenix.LiveView
+         alias EffectsFixture.Posts
+
+         def handle_event("save", %{"id" => id, "post" => attrs}, socket) do
+           Posts.update_post(id, attrs)
+           {:noreply, socket}
+         end
+
+         def handle_event("save_own", %{"id" => id, "post" => attrs}, %{assigns: %{current_scope: scope}} = socket) do
+           Posts.update_own_post(scope.user, id, attrs)
+           {:noreply, socket}
+         end
+       end
+
+       defmodule EffectsFixture.PostReactionComponent do
+         @behaviour Phoenix.LiveComponent
+
+         def handle_event("react", %{"id" => id}, socket), do: EffectsFixture.PostReactions.react(socket, id)
+       end
+
+       defmodule EffectsFixture.PostFlagComponent do
+         @behaviour Phoenix.LiveComponent
+
+         def handle_event("flag", %{"id" => id}, socket), do: EffectsFixture.PostReactions.flag(socket, id)
+       end
+
+       defmodule EffectsFixture.PostReactions do
+         alias EffectsFixture.Repo
+
+         def react(socket, id) do
+           Repo.insert({:reaction, socket.assigns.current_user.id, id})
+           {:noreply, socket}
+         end
+
+         def flag(socket, id) do
+           Repo.insert({:flag, id})
+           {:noreply, socket}
+         end
+       end
+
+       defmodule EffectsFixture.PostAdminController do
+         @behaviour Plug
+         alias EffectsFixture.Posts
+
+         def init(action), do: action
+         def call(conn, action), do: phoenix_controller_pipeline(conn, action)
+
+         def feature(conn, %{"id" => id}) do
+           {:ok, post} = Posts.update_post(id, %{featured: true})
+           Map.put(conn, :post, post)
+         end
+
+         def unfeature(conn, %{"id" => id}) do
+           {:ok, post} = Posts.update_post(id, %{featured: false})
+           Map.put(conn, :post, post)
+         end
+
+         defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
+       end
+
+       defmodule EffectsFixture.PostRequireAdmin do
+         def init(opts), do: opts
+         def call(conn, _opts), do: if(conn.assigns.current_user.admin, do: conn, else: Map.put(conn, :halted, true))
+       end
+
+       defmodule EffectsFixture.Router do
+         alias EffectsFixture.PostAdminController
+
+         def __match_route__("POST", ["admin", "posts", id, "feature"], _host) do
+           route = %{plug: PostAdminController, plug_opts: :feature, pipe_through: [:browser, :admin], path_params: %{"id" => id}}
+           {route, nil, &__pipe_through0__/1, {PostAdminController, :feature}}
+         end
+
+         def __match_route__("POST", ["posts", id, "unfeature"], _host) do
+           route = %{plug: PostAdminController, plug_opts: :unfeature, pipe_through: [:browser], path_params: %{"id" => id}}
+           {route, nil, &__pipe_through1__/1, {PostAdminController, :unfeature}}
+         end
+
+         def browser(conn, _opts), do: conn
+         def admin(conn, _opts), do: EffectsFixture.PostRequireAdmin.call(conn, [])
+
+         defp __pipe_through0__(conn), do: conn |> browser([]) |> admin([])
+         defp __pipe_through1__(conn), do: browser(conn, [])
+       end
+
+       defmodule EffectsFixture.PostChannel do
+         @behaviour Phoenix.Channel
+
+         def handle_in("delete", %{"id" => id}, socket) do
+           EffectsFixture.Repo.delete({:post, id})
+           {:noreply, socket}
+         end
        end
        """},
       {@billing,
@@ -316,6 +472,40 @@ defmodule ArchTest.EffectsTest do
       assert hd(violations).fix ==
                "do it after the transaction commits, or record it in the transaction, as an outbox row or an " <>
                  "Oban job, and do it after the commit"
+    end
+  end
+
+  describe "writes_are_authorized/2" do
+    test "flags endpoints that write without the current user or a policy check" do
+      violations =
+        capture(&Effects.writes_are_authorized/2, "EffectsFixture.Post*",
+          policy: [EffectsFixture.Policy, EffectsFixture.PostRequireAdmin]
+        )
+
+      unchecked = ": nothing checks that the user asking may make this change"
+
+      assert Enum.map(violations, &{&1.module, &1.caller_function, &1.line, &1.message}) == [
+               {EffectsFixture.PostController, {:update, 2}, 21,
+                "writes to the database through EffectsFixture.Posts.update_post/2, which reaches " <>
+                  "EffectsFixture.Repo.update/1" <> unchecked},
+               {EffectsFixture.PostLive, {:handle_event, 3}, 62,
+                "writes to the database through EffectsFixture.Posts.update_post/2, which reaches " <>
+                  "EffectsFixture.Repo.update/1" <> unchecked},
+               {EffectsFixture.PostFlagComponent, {:handle_event, 3}, 81,
+                "writes to the database through EffectsFixture.PostReactions.flag/2, which reaches " <>
+                  "EffectsFixture.Repo.insert/1" <> unchecked},
+               {EffectsFixture.PostAdminController, {:unfeature, 2}, 111,
+                "writes to the database through EffectsFixture.Posts.update_post/2, which reaches " <>
+                  "EffectsFixture.Repo.update/1" <> unchecked},
+               {EffectsFixture.PostChannel, {:handle_in, 3}, 147,
+                "writes to the database through EffectsFixture.Repo.delete/1" <> unchecked}
+             ]
+
+      assert hd(violations).file == @web
+
+      assert hd(violations).fix ==
+               "pass the current user or scope to the code that writes, and scope the change to it, or check " <>
+                 "EffectsFixture.Policy or EffectsFixture.PostRequireAdmin first"
     end
   end
 
