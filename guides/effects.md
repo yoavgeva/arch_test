@@ -180,8 +180,29 @@ write passes when:
   `current_user(conn)` helper, or a value made from them, such as `user.id`. This is how Phoenix's scopes and most
   contexts authorize: the query only finds the user's own records. A call given `conn` or `socket` is followed, since
   it can read the user from them;
-- **or a policy is checked**: the endpoint, one of its controller's plugs, or a pipeline every route to the action
-  goes through, as `pipe_through :require_admin` does, calls `Bodyguard`, `Canada`, or a module given as `policy:`:
+- **it runs in a function given to a helper that reads the user first**, as one that checks the user's role and then
+  runs the change does:
+
+```elixir
+def cancel(conn, %{"id" => id}) do
+  with_own_order(conn, id, fn order -> Orders.cancel_order(order) end)
+end
+
+defp with_own_order(conn, id, fun) do
+  order = Orders.get_order!(id)
+  if order.user_id == conn.assigns.current_user.id, do: fun.(order), else: send_resp(conn, 403, "")
+end
+```
+
+- **it's a LiveView event acting on a record the socket holds**, as `Posts.update_post(socket.assigns.post, attrs)`,
+  and the LiveView's `mount/3` or `handle_params/3` loads its records for the user asking, as
+  `Posts.get_user_post!(socket.assigns.current_user, id)` does, or the LiveComponent's `update/2` is given the user
+  by its parent. A `mount/3` that loads the post for anyone leaves the event flagged;
+- **every route to it is a GET or HEAD**: a request to read, so what it writes is bookkeeping, as a cache or a view
+  count is;
+- **or a policy is checked**: the endpoint, one of its controller's plugs, a pipeline every route to the action
+  goes through, as `pipe_through :require_admin` does, or, for a LiveView's events, the `on_mount` hooks of the
+  `live_session` every route to it is in, calls `Bodyguard`, `Canada`, or a module given as `policy:`:
 
 ```elixir
 writes_are_authorized(modules_matching("MyAppWeb.**"), app: :my_app,

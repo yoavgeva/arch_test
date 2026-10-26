@@ -11,7 +11,9 @@ defmodule ArchTest.Code.Actors do
   # - and any variable bound from those, by `=`, `<-` or a `case` clause.
   #
   # And which calls are given the request itself, `conn` or `socket`, which holds the user asking for the code it
-  # reaches to read.
+  # reaches to read; which calls a function given as an argument makes, with the call it's given to; which calls are
+  # given a value the request's assigns hold, as `socket.assigns.post` is; and whether the function reads the user
+  # asking at all.
 
   alias ArchTest.Code
 
@@ -19,9 +21,13 @@ defmodule ArchTest.Code.Actors do
   @actor_words ~w(user scope account actor member owner)
   @requests [:conn, :socket]
 
+  @type call :: {Code.key(), pos_integer() | nil}
   @type calls :: %{
-          on_behalf: [{Code.key(), pos_integer() | nil}],
-          requests: [{Code.key(), pos_integer() | nil}]
+          on_behalf: [call()],
+          requests: [call()],
+          callbacks: [{call(), [call()]}],
+          held: [call()],
+          reads_user: boolean()
         }
 
   @doc false
@@ -30,11 +36,16 @@ defmodule ArchTest.Code.Actors do
   def calls(clauses, module, locals) do
     found =
       Enum.flat_map(clauses, fn {_meta, args, _guards, body} ->
-        actors = args |> pattern_actors() |> spread(bindings(body))
+        bindings = bindings(body)
+        actors = args |> pattern_actors() |> spread(bindings)
+        held = spread_held(MapSet.new(), bindings)
+
+        reads =
+          if MapSet.size(actors) > 0 or carries?(body, actors), do: [{:reads, true}], else: []
 
         body
-        |> Macro.prewalk([], fn node, acc ->
-          {node, classify(node, actors, module, locals) ++ acc}
+        |> Macro.prewalk(reads, fn node, acc ->
+          {node, classify(node, {actors, held}, module, locals) ++ acc}
         end)
         |> elem(1)
         |> Enum.reverse()
@@ -42,22 +53,78 @@ defmodule ArchTest.Code.Actors do
 
     %{
       on_behalf: for({:on_behalf, call} <- found, do: call),
-      requests: for({:request, call} <- found, do: call)
+      requests: for({:request, call} <- found, do: call),
+      callbacks: for({:callback, pair} <- found, do: pair),
+      held: for({:held, call} <- found, do: call),
+      reads_user: Keyword.has_key?(found, :reads)
     }
   end
 
-  defp classify(node, actors, module, locals) do
+  defp classify(node, {actors, held}, module, locals) do
     case call(node, module, locals) do
       nil ->
         []
 
       {target, line, args} ->
-        for {kind, true} <- [
-              on_behalf: carries?(args, actors),
-              request: Enum.any?(args, &request?/1)
-            ],
-            do: {kind, {target, line}}
+        kinds =
+          for {kind, true} <- [
+                on_behalf: carries?(args, actors),
+                request: Enum.any?(args, &request?/1),
+                held: holds?(args, held)
+              ],
+              do: {kind, {target, line}}
+
+        kinds ++
+          for(
+            {:fn, _, _} = fun <- args,
+            do: {:callback, {{target, line}, calls_in(fun, module, locals)}}
+          )
     end
+  end
+
+  defp calls_in(ast, module, locals) do
+    ast
+    |> Macro.prewalk([], fn node, acc ->
+      case call(node, module, locals) do
+        {target, line, _args} -> {node, [{target, line} | acc]}
+        nil -> {node, acc}
+      end
+    end)
+    |> elem(1)
+  end
+
+  # Whether an expression carries a value the request's assigns hold, other than the user asking: a record the
+  # server loaded, as `socket.assigns.post` is, or a variable bound from one.
+  defp holds?(ast, held) do
+    ast
+    |> Macro.prewalk(false, fn node, found -> {node, found or held?(node, held)} end)
+    |> elem(1)
+  end
+
+  defp held?({name, meta, context}, held)
+       when is_atom(name) and is_list(meta) and is_atom(context),
+       do: MapSet.member?(held, {name, context})
+
+  defp held?({{:., _, [base, key]}, meta, []}, _held) when is_atom(key),
+    do: Keyword.get(meta, :no_parens, false) and request_assigns?(base) and not actor_key?(key)
+
+  defp held?({{:., _, [Access, :get]}, _, [base, key | _]}, _held) when is_atom(key),
+    do: request_assigns?(base) and not actor_key?(key)
+
+  defp held?(_node, _held), do: false
+
+  defp request_assigns?({{:., _, [base, :assigns]}, meta, []}),
+    do: Keyword.get(meta, :no_parens, false) and request?(base)
+
+  defp request_assigns?(_ast), do: false
+
+  defp spread_held(held, bindings) do
+    next =
+      Enum.reduce(bindings, held, fn {left, right}, acc ->
+        if holds?(right, acc), do: MapSet.union(acc, MapSet.new(vars(left))), else: acc
+      end)
+
+    if MapSet.size(next) == MapSet.size(held), do: held, else: spread_held(next, bindings)
   end
 
   defp call({{:., _, [callee, name]}, meta, args}, _module, _locals)
@@ -153,6 +220,10 @@ defmodule ArchTest.Code.Actors do
 
       {:case, _, [subject, [do: clauses]]} = node, acc when is_list(clauses) ->
         {node, for({:->, _, [[pattern], _body]} <- clauses, do: {pattern, subject}) ++ acc}
+
+      # An anonymous function's parameters, as `fn %{current_user: user} -> ... end` given a socket's assigns.
+      {:fn, _, clauses} = node, acc ->
+        {node, for({:->, _, [patterns, _body]} <- clauses, do: {patterns, nil}) ++ acc}
 
       node, acc ->
         {node, acc}

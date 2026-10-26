@@ -54,7 +54,13 @@ defmodule ArchTest.Code do
           routes: [route()],
           component_values: MapSet.t(String.t())
         }
-  @type route :: %{controller: module(), action: atom(), pipe_through: [atom()]}
+  @type route :: %{
+          controller: module(),
+          action: atom(),
+          pipe_through: [atom()],
+          verb: String.t() | nil,
+          on_mount: [module()]
+        }
   @type t :: %__MODULE__{
           modules: %{module() => module_info()},
           functions: %{key() => function_info()},
@@ -238,13 +244,15 @@ defmodule ArchTest.Code do
     |> elem(1)
   end
 
-  # A Phoenix router's routes, from the clauses of its `__match_route__/3`: each one's controller, action, and the
-  # pipelines it goes through, which the router defines as functions of the same names.
+  # A Phoenix router's routes, from the clauses of its `__match_route__/3`: each one's controller or LiveView, action,
+  # HTTP verb, the pipelines it goes through, which the router defines as functions of the same names, and a
+  # LiveView's `on_mount` hooks.
   defp routes_in(definitions) do
     for {{:__match_route__, 3}, _kind, _meta, clauses} <- definitions,
-        {_meta, _args, _guards, body} <- clauses,
+        {_meta, args, _guards, body} <- clauses,
+        verb = Enum.find(args, &is_binary/1),
         route <- route_maps(body),
-        do: route
+        do: Map.put(route, :verb, verb)
   end
 
   defp route_maps(body) do
@@ -261,11 +269,29 @@ defmodule ArchTest.Code do
          controller when is_atom(controller) and controller != nil <- pairs[:plug],
          action when is_atom(action) and action != nil <- pairs[:plug_opts],
          pipelines when is_list(pipelines) <- pairs[:pipe_through] do
-      %{controller: controller, action: action, pipe_through: pipelines}
+      live(
+        %{controller: controller, action: action, pipe_through: pipelines, on_mount: []},
+        pairs[:phoenix_live_view]
+      )
     else
       _ -> nil
     end
   end
+
+  # A LiveView's route: the LiveView, and the modules its live_session's `on_mount` hooks name.
+  defp live(route, {:{}, _, [view, _action, _opts, session]}) when is_atom(view) do
+    hooks =
+      session
+      |> Macro.prewalk([], fn
+        {:id, {module, _}} = node, acc when is_atom(module) -> {node, [module | acc]}
+        node, acc -> {node, acc}
+      end)
+      |> elem(1)
+
+    %{route | controller: view, on_mount: Enum.reverse(hooks)}
+  end
+
+  defp live(route, _metadata), do: route
 
   # The positions each function's spec types `boolean()`.
   defp booleans_in(binary) do
