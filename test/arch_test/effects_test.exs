@@ -44,6 +44,10 @@ defmodule ArchTest.EffectsTest do
          defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
        end
 
+       defmodule EffectsFixture.Batches do
+         def each_for(subject, ids, fun), do: Enum.each(ids, &fun.(subject, &1))
+       end
+
        defmodule EffectsFixture.CheckedController do
          @behaviour Plug
          alias EffectsFixture.Posts
@@ -67,6 +71,13 @@ defmodule ArchTest.EffectsTest do
            post = Posts.get_post(id)
            if post.user_id != nil, do: Posts.update_post(post.id, %{published: false}), else: conn
          end
+
+         def archive_all(conn, %{"ids" => ids}) do
+           EffectsFixture.Batches.each_for(conn.assigns.subject, ids, &archive/2)
+           conn
+         end
+
+         defp archive(_subject, id), do: Posts.update_post(id, %{archived: true})
 
          defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
        end

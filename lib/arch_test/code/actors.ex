@@ -75,25 +75,56 @@ defmodule ArchTest.Code.Actors do
 
   defp classify(node, {actors, held}, module, locals) do
     case call(node, module, locals) do
-      nil ->
-        []
-
-      {target, line, args} ->
-        kinds =
-          for {kind, true} <- [
-                on_behalf: carries?(args, actors),
-                request: Enum.any?(args, &request?/1),
-                held: holds?(args, held)
-              ],
-              do: {kind, {target, line}}
-
-        kinds ++
-          for(
-            {:fn, _, _} = fun <- args,
-            do: {:callback, {{target, line}, calls_in(fun, module, locals)}}
-          )
+      nil -> []
+      {target, line, args} -> classify_call({target, line}, args, {actors, held}, module, locals)
     end
   end
+
+  defp classify_call(call, args, {actors, held}, module, locals) do
+    on_behalf? = carries?(args, actors)
+
+    kinds =
+      for {kind, true} <- [
+            on_behalf: on_behalf?,
+            request: Enum.any?(args, &request?/1),
+            held: holds?(args, held)
+          ],
+          do: {kind, call}
+
+    callbacks =
+      for {:fn, _, _} = fun <- args, do: {:callback, {call, calls_in(fun, module, locals)}}
+
+    captured = if on_behalf?, do: captures(args, module, locals), else: []
+    kinds ++ callbacks ++ Enum.map(captured, &{:on_behalf, &1})
+  end
+
+  # The functions captured in a call's arguments, as `&archive/2` is, where they're captured: given along with the
+  # user asking, as `Batches.each_for(subject, ids, &archive/2)` gives it, they run on the user's behalf.
+  defp captures(args, module, locals) do
+    args
+    |> Macro.prewalk([], fn
+      {:&, meta, [{:/, _, [callee, arity]}]} = node, acc when is_integer(arity) ->
+        case captured(callee, arity, module, locals) do
+          nil -> {node, acc}
+          target -> {node, [{target, meta[:line]} | acc]}
+        end
+
+      node, acc ->
+        {node, acc}
+    end)
+    |> elem(1)
+  end
+
+  defp captured({{:., _, [callee, name]}, _, []}, arity, _module, _locals)
+       when is_atom(callee) and is_atom(name),
+       do: {callee, name, arity}
+
+  defp captured({name, _, context}, arity, module, locals)
+       when is_atom(name) and is_atom(context) do
+    if MapSet.member?(locals, {name, arity}), do: {module, name, arity}
+  end
+
+  defp captured(_callee, _arity, _module, _locals), do: nil
 
   defp calls_in(ast, module, locals) do
     ast
