@@ -66,7 +66,11 @@ defmodule ArchTest.Data do
   themselves an admin, or move a record to another account. Passing the current user doesn't help: the user is
   changing their own record.
 
-  An endpoint that a policy checks, as `writes_are_authorized/2` reads one, passes: an admin may set roles.
+  An endpoint that a policy checks, as `writes_are_authorized/2` reads one, passes: an admin may set roles. So does
+  a change made in a function given to a helper that checks the user first, as
+  `with_admin(conn, fn -> Accounts.set_role(user, params) end)` does. Only the params map itself counts, or a map
+  inside it, as `params["user"]` is: a map the code builds, as `%{role: role}`, holds the keys the code chose, and
+  keys it puts, merges in or drops, as `Map.put(params, "user_id", user.id)` does, are the code's too.
 
   ## Options
 
@@ -77,12 +81,32 @@ defmodule ArchTest.Data do
     {configured, policies} = Authorization.policies(opts)
     {modules, code, _effects} = Rules.analyze(subject, opts)
     routes = Authorization.routes(code, opts)
-    casting = Reach.paths(code, fn _key, info -> privileged(info.casts) != [] end)
+
+    # Only the request's map itself carries keys the client chose, less those the code sets on the way.
+    search = %{
+      sink: &cast_sink/3,
+      extend: fn flow, fields -> if flow.whole, do: nonempty(fields -- atoms(flow.overrides)) end,
+      passes?: fn _key, info, flow ->
+        flow.whole and
+          not MapSet.member?(Authorization.guarded(info, code), {flow.target, flow.line})
+      end
+    }
+
+    casting = Reach.flowing(code, search)
 
     violations =
       for module <- modules,
           endpoint <- Authorization.endpoints(code, module, :changes),
-          {call, path, fields} <- List.wrap(casting(code, endpoint, casting)),
+          {call, path, fields} <-
+            List.wrap(
+              Reach.first_flow(
+                endpoint,
+                code.functions[endpoint],
+                Authorization.request_params(endpoint),
+                casting,
+                search
+              )
+            ),
           not Authorization.checked?(code, routes, endpoint, policies) do
         through =
           if path == [],
@@ -212,20 +236,25 @@ defmodule ArchTest.Data do
   def fetch?({Ecto.Repo.Queryable, name, _arity}), do: name in @fetches
   def fetch?(_target), do: false
 
-  # The first privileged cast an endpoint makes or reaches, with the call that leads there and the path to it.
-  defp casting(code, endpoint, casting) do
-    info = code.functions[endpoint]
-
-    case info.casts |> Enum.map(&{&1, privileged([&1])}) |> Enum.find(&(elem(&1, 1) != [])) do
-      {cast, fields} ->
-        {%{target: endpoint, line: cast.line}, [], fields}
-
-      nil ->
-        with {call, path} <- Reach.first_path(info.calls, casting) do
-          {call, path, privileged(code.functions[List.last(path).target].casts)}
-        end
-    end
+  # A cast/3 that takes privileged fields from the map flowing in, but for those the code set on it: the function
+  # holding it is where the path ends.
+  defp cast_sink(_key, info, %{target: {Ecto.Changeset, :cast, _arity}, to: 1, line: line} = flow) do
+    with fields when fields != nil <-
+           info.casts
+           |> Enum.filter(&(&1.line == line))
+           |> privileged()
+           |> Kernel.--(atoms(flow.overrides))
+           |> nonempty(),
+         do: {[], fields}
   end
+
+  defp cast_sink(_key, _info, _flow), do: nil
+
+  defp atoms(keys),
+    do: for(key <- keys, field <- @privileged, Atom.to_string(field) == key, do: field)
+
+  defp nonempty([]), do: nil
+  defp nonempty(list), do: list
 
   defp privileged(casts) do
     for cast <- casts, field <- cast.fields, field in @privileged, uniq: true, do: field

@@ -47,6 +47,7 @@ defmodule ArchTest.Code do
           whole_tables: [Data.table()],
           derived: [Data.derived()],
           locks: boolean(),
+          flows: [Data.flow()],
           signature: Signatures.t()
         }
   @type module_info :: %{
@@ -405,6 +406,7 @@ defmodule ArchTest.Code do
          whole_tables: Data.whole_tables(clauses),
          derived: Data.derived(clauses),
          locks: Data.locks?(clauses),
+         flows: Data.flows(clauses, module, locals),
          signature:
            Signatures.of(
              clauses,

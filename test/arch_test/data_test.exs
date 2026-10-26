@@ -66,6 +66,21 @@ defmodule ArchTest.DataTest do
          def get_user!(id), do: Repo.get!(User, id)
        end
 
+       defmodule DataFixture.Audit do
+         @compile {:no_warn_undefined, [Ecto.Changeset]}
+
+         def entry(attrs), do: Ecto.Changeset.cast(%{}, attrs, [:user_id, :action, :note])
+         def log(user, params), do: DataFixture.Repo.update(entry(%{user_id: user.id, note: params["note"]}))
+       end
+
+       defmodule DataFixture.Drafts do
+         @compile {:no_warn_undefined, [Ecto.Changeset]}
+
+         def changeset(draft, attrs), do: Ecto.Changeset.cast(draft, attrs, [:title, :user_id])
+         def create(user, attrs), do: DataFixture.Repo.update(changeset(%{}, Map.put(attrs, "user_id", user.id)))
+         def create_for(user, attrs), do: DataFixture.Repo.update(changeset(%{}, Map.merge(attrs, %{"title" => user.name})))
+       end
+
        defmodule DataFixture.Policy do
          def authorize!(user, action), do: if(user.admin, do: :ok, else: raise("can't \#{action}"))
        end
@@ -189,6 +204,47 @@ defmodule ArchTest.DataTest do
 
          def mount(_params, _session, socket), do: {:ok, Map.put(socket, :posts, DataFixture.Blog.list_posts())}
        end
+
+       defmodule DataFixture.PostEditLive do
+         @behaviour Phoenix.LiveView
+
+         def mount(%{"slug" => slug}, _session, socket) do
+           blog = DataFixture.Blog.get_user_post!(socket.assigns.current_user, slug)
+           {:ok, Map.put(socket, :assigns, %{blog: blog})}
+         end
+
+         def handle_event("open", %{"id" => id}, socket),
+           do: {:noreply, Map.put(socket, :post, DataFixture.Repo.get_by(DataFixture.Blog.Post, id: id, blog_id: socket.assigns.blog.id))}
+       end
+
+       defmodule DataFixture.DraftController do
+         @behaviour Plug
+         alias DataFixture.{Accounts, Audit, Drafts}
+
+         def init(action), do: action
+         def call(conn, action), do: phoenix_controller_pipeline(conn, action)
+
+         def log(conn, params), do: Audit.log(conn.assigns.current_user, params)
+
+         def create(conn, %{"draft" => attrs}), do: Drafts.create(conn.assigns.current_user, attrs)
+
+         def create_titled(conn, %{"draft" => attrs}), do: Drafts.create_for(conn.assigns.current_user, attrs)
+
+         def show_user(conn, %{"id" => id}), do: with_own_user(conn, id, fn user -> Map.put(conn, :user, user) end)
+
+         def promote(conn, %{"user" => attrs}),
+           do: with_admin(conn, fn -> Accounts.update_user(conn.assigns.current_user, attrs) end)
+
+         defp with_admin(conn, fun), do: if(conn.assigns.current_user.admin, do: fun.(), else: conn)
+
+         defp with_own_user(conn, id, fun) do
+           current = conn.assigns.current_user
+           user = Accounts.get_user!(id)
+           if user.id == current.id, do: fun.(user), else: conn
+         end
+
+         defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
+       end
        """},
       {@billing, @billing_source}
     ])
@@ -199,14 +255,18 @@ defmodule ArchTest.DataTest do
   end
 
   describe "no_mass_assignment/2" do
-    test "flags endpoints whose params reach a cast of a privileged field, and passes a policy-checked one" do
+    test "flags endpoints whose params reach a cast of a privileged field, and passes policies, maps the code " <>
+           "builds and keys it sets" do
       violations =
         capture(&Data.no_mass_assignment/2, "DataFixture.**", policy: DataFixture.Policy)
 
       assert Enum.map(violations, &{&1.module, &1.caller_function, &1.line, &1.message}) == [
                {DataFixture.PostController, {:update_account, 2}, 50,
                 "lets the request set :role through DataFixture.Accounts.update_user/2, which reaches " <>
-                  "DataFixture.Accounts.User.changeset/2, where cast/3 takes it from the params"}
+                  "DataFixture.Accounts.User.changeset/2, where cast/3 takes it from the params"},
+               {DataFixture.DraftController, {:create_titled, 2}, 101,
+                "lets the request set :user_id through DataFixture.Drafts.create_for/2, which reaches " <>
+                  "DataFixture.Drafts.changeset/2, where cast/3 takes it from the params"}
              ]
 
       assert hd(violations).fix ==

@@ -290,22 +290,36 @@ defmodule ArchTest.Effects do
     {modules, code, _effects} = Rules.analyze(subject, opts)
     routes = Authorization.routes(code, opts)
 
-    fetching =
-      Reach.paths(code, fn _key, info ->
-        Enum.any?(info.calls, &ArchTest.Data.fetch?(&1.target))
-      end)
+    # A call made on behalf of the user asking is scoped to them, and a helper that reads the user checks what it
+    # loads, as one that loads an organization and then checks the user's role in it does.
+    unchecked = fn key, info, flow ->
+      not MapSet.member?(Authorization.on_behalf(key, info, code), {flow.target, flow.line})
+    end
 
-    reads = &Reach.first_path(&1, fetching)
+    search = %{
+      sink: &fetch_sink/3,
+      extend: fn _flow, carried -> carried end,
+      passes?: fn key, info, flow ->
+        not info.actors.reads_user and unchecked.(key, info, flow)
+      end
+    }
+
+    fetching = Reach.flowing(code, search)
 
     violations =
       for module <- modules,
           endpoint <- Authorization.endpoints(code, module, :reads),
           not Authorization.checked?(code, routes, endpoint, policies),
-          {call, path} <- List.wrap(Authorization.unchecked(code, endpoint, reads)) do
-        fetcher = code.functions[List.last(path).target]
-        fetch = Enum.find(fetcher.calls, &ArchTest.Data.fetch?(&1.target))
-        path = path ++ [Rules.step(fetch)]
-
+          {call, path, _carried} <-
+            List.wrap(
+              Reach.first_flow(
+                endpoint,
+                code.functions[endpoint],
+                Authorization.request_params(endpoint),
+                fetching,
+                %{search | passes?: unchecked}
+              )
+            ) do
         Rules.violation(code, "reads_are_authorized", endpoint,
           line: call.line,
           callee: call.target,
@@ -320,6 +334,10 @@ defmodule ArchTest.Effects do
 
     Rules.report(violations, "reads_are_authorized")
   end
+
+  # A repo call that reads one row by the key flowing in, as the id `Repo.get!/2` hands `Ecto.Repo.Queryable.get!/4`.
+  defp fetch_sink(_key, _info, flow),
+    do: if(ArchTest.Data.fetch?(flow.target) and flow.to == 2, do: {[Rules.step(flow)], true})
 
   @doc """
   Asserts that no GenServer in `subject` does I/O in `init/1`.

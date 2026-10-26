@@ -242,6 +242,81 @@ defmodule ArchTest.Code.Effects do
   end
 
   @doc false
+  # Which parameters of each function flow into a sink, as an id given to `Repo.get!/2` does, through the calls it
+  # makes with them, until no more are found. Each comes with the path from the function's call there, and what the
+  # flow carries. A search's `sink` takes a function, its info and one of its flows, and returns `{path, carried}`
+  # when the flow ends in a sink; `extend` takes a flow into a function found before and what that one carries, and
+  # returns what the flow carries, or nil when nothing reaches the sink that way; flows `passes?` rejects don't count.
+  @type search :: %{
+          sink: (Code.key(), Code.function_info(), map() -> {[step()], term()} | nil),
+          extend: (map(), term() -> term() | nil),
+          passes?: (Code.key(), Code.function_info(), map() -> boolean())
+        }
+  @spec flowing(Code.t(), search()) :: %{Code.key() => %{non_neg_integer() => {[step()], term()}}}
+  def flowing(%Code{functions: functions}, search) do
+    keys = functions |> Map.keys() |> Enum.sort()
+    flowing(keys, functions, search, %{})
+  end
+
+  defp flowing(keys, functions, search, found) do
+    next =
+      Enum.reduce(keys, found, fn key, acc ->
+        info = functions[key]
+
+        info.flows
+        |> Enum.sort_by(& &1.line)
+        |> Enum.reduce(acc, &found_flow(key, info, &1, &2, search))
+      end)
+
+    if next == found, do: found, else: flowing(keys, functions, search, next)
+  end
+
+  defp found_flow(key, info, flow, found, search) do
+    with false <- Map.has_key?(Map.get(found, key, %{}), flow.from),
+         {path, carried} <- reaches(key, info, flow, found, search) do
+      Map.update(
+        found,
+        key,
+        %{flow.from => {path, carried}},
+        &Map.put(&1, flow.from, {path, carried})
+      )
+    else
+      _ -> found
+    end
+  end
+
+  defp reaches(key, info, flow, found, search) do
+    with true <- search.passes?.(key, info, flow) do
+      search.sink.(key, info, flow) || through(found, flow, search)
+    end
+  end
+
+  defp through(found, flow, search) do
+    with {path, carried} <- get_in(found, [flow.target, flow.to]),
+         carried when carried != nil <- search.extend.(flow, carried) do
+      {[step(flow) | path], carried}
+    end
+  end
+
+  @doc false
+  # The first of a function's flows, by line, from one of `positions` into a sink, or into a function `found` says
+  # leads to one: the call, the path from it, and what the flow carries.
+  @spec first_flow(Code.key(), Code.function_info(), [non_neg_integer()], map(), search()) ::
+          {step(), [step()], term()} | nil
+  def first_flow(key, info, positions, found, search) do
+    info.flows
+    |> Enum.sort_by(& &1.line)
+    |> Enum.find_value(fn flow ->
+      with true <- flow.from in positions,
+           {path, carried} <- reaches(key, info, flow, found, search) do
+        {step(flow), path, carried}
+      else
+        _ -> nil
+      end
+    end)
+  end
+
+  @doc false
   # The first of `calls`, by line, to a function in `paths`, with the path from that call to what it leads to.
   @spec first_path([Code.call()], %{Code.key() => [step()]}) :: {Code.call(), [step()]} | nil
   def first_path(calls, paths) do

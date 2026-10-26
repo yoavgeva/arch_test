@@ -9,6 +9,14 @@ defmodule ArchTest.Code.Data do
   @type cast :: %{line: pos_integer() | nil, fields: [atom()]}
   @type table :: %{target: Code.key(), line: pos_integer() | nil, schema: module()}
   @type derived :: %{line: pos_integer() | nil, field: atom()}
+  @type flow :: %{
+          from: non_neg_integer(),
+          target: Code.key(),
+          to: non_neg_integer(),
+          line: pos_integer() | nil,
+          whole: boolean(),
+          overrides: [String.t()]
+        }
 
   # What turns a value into a new one, here an old value of the field it's written back to.
   @operators [:+, :-, :*, :/, :++, :<>, :div, :rem]
@@ -103,6 +111,37 @@ defmodule ArchTest.Code.Data do
   end
 
   @doc false
+  # For each call, which of the function's parameters flow into which of its arguments: a parameter's variables, and
+  # every variable bound from an expression that holds one, as `id = String.to_integer(params["id"])` binds `id`. A
+  # flow is `whole` when the argument is the parameter's map itself, or a map inside it, as `params["user"]` is, rather
+  # than a value made from it: then `overrides` are the keys the code sets on the way, as
+  # `Map.put(params, "user_id", user.id)` sets one. A lower arity that passes its arguments on, as a default argument
+  # makes, flows into the full one.
+  @spec flows([tuple()], module(), MapSet.t()) :: [flow()]
+  def flows(clauses, module, locals) do
+    clauses
+    |> Enum.flat_map(fn {_meta, args, _guards, body} ->
+      params =
+        for {arg, position} <- Enum.with_index(args), var <- vars(arg), reduce: %{} do
+          acc -> Map.update(acc, var, MapSet.new([position]), &MapSet.put(&1, position))
+        end
+
+      bound = patterns(body)
+      held = spread(params, bound)
+      whole = Map.new(params, fn {var, found} -> {var, Map.new(found, &{&1, MapSet.new()})} end)
+      maps = spread_maps(whole, bound)
+
+      body
+      |> Macro.prewalk([], fn node, acc ->
+        {node, call_flows(node, {held, maps}, module, locals) ++ acc}
+      end)
+      |> elem(1)
+      |> Enum.reverse()
+    end)
+    |> Enum.uniq()
+  end
+
+  @doc false
   # Each field's type, from the `__changeset__/0` an Ecto schema defines.
   @spec fields([tuple()]) :: %{atom() => term()}
   def fields(definitions) do
@@ -133,7 +172,7 @@ defmodule ArchTest.Code.Data do
 
   defp table({name, meta, context}, bound, depth)
        when is_atom(name) and is_list(meta) and is_atom(context) and depth < 8 do
-    case Map.fetch(bound, {name, context}) do
+    case Map.fetch(bound, var(name, meta, context)) do
       {:ok, query} -> table(query, bound, depth + 1)
       :error -> nil
     end
@@ -209,7 +248,7 @@ defmodule ArchTest.Code.Data do
     |> Macro.prewalk(%{}, fn
       {:=, _, [{name, meta, context}, expression]} = node, acc
       when is_atom(name) and is_list(meta) and is_atom(context) ->
-        {node, Map.put(acc, {name, context}, expression)}
+        {node, Map.put(acc, var(name, meta, context), expression)}
 
       node, acc ->
         {node, acc}
@@ -239,7 +278,7 @@ defmodule ArchTest.Code.Data do
 
   # The variable a record or changeset is held in, as `post` in `post` or `changeset.data`.
   defp root({name, meta, context}) when is_atom(name) and is_list(meta) and is_atom(context),
-    do: {name, context}
+    do: var(name, meta, context)
 
   defp root({{:., _, [base, _field]}, _, []}), do: root(base)
   defp root(_ast), do: nil
@@ -277,4 +316,194 @@ defmodule ArchTest.Code.Data do
     end)
     |> elem(1)
   end
+
+  # Every `pattern = expression`, `pattern <- expression` and `case expression do pattern -> ... end` in a body.
+  defp patterns(body) do
+    body
+    |> Macro.prewalk([], fn
+      {op, _, [left, right]} = node, acc when op in [:=, :<-] ->
+        {node, [{left, right} | acc]}
+
+      {:case, _, [subject, [do: clauses]]} = node, acc when is_list(clauses) ->
+        {node, for({:->, _, [[pattern], _body]} <- clauses, do: {pattern, subject}) ++ acc}
+
+      node, acc ->
+        {node, acc}
+    end)
+    |> elem(1)
+  end
+
+  # The parameters each variable holds a value from, adding every variable a pattern binds from an expression that
+  # holds one, until no more are found.
+  defp spread(held, patterns) do
+    next =
+      Enum.reduce(patterns, held, fn {left, right}, acc ->
+        case positions(right, acc) do
+          [] ->
+            acc
+
+          found ->
+            found = MapSet.new(found)
+
+            Enum.reduce(vars(left), acc, &add_positions(&2, &1, found))
+        end
+      end)
+
+    if next == held, do: held, else: spread(next, patterns)
+  end
+
+  defp add_positions(held, var, found), do: Map.update(held, var, found, &MapSet.union(&1, found))
+
+  defp positions(ast, held) do
+    ast
+    |> Macro.prewalk(MapSet.new(), fn
+      {name, meta, context} = node, acc
+      when is_atom(name) and is_list(meta) and is_atom(context) ->
+        {node, MapSet.union(acc, Map.get(held, var(name, meta, context), MapSet.new()))}
+
+      node, acc ->
+        {node, acc}
+    end)
+    |> elem(1)
+    |> Enum.sort()
+  end
+
+  defp call_flows(node, {held, maps}, module, locals) do
+    case callee(node, module, locals) do
+      {target, line, args} ->
+        for {arg, to} <- Enum.with_index(args),
+            shapes = shape(arg, maps),
+            from <- positions(arg, held) do
+          overrides = Map.get(shapes, from)
+
+          %{
+            from: from,
+            target: target,
+            to: to,
+            line: line,
+            whole: overrides != nil,
+            overrides: if(overrides, do: Enum.sort(overrides), else: [])
+          }
+        end
+
+      nil ->
+        []
+    end
+  end
+
+  # The variables holding a parameter's map, or a map inside it, with the keys set on the way.
+  defp spread_maps(maps, patterns) do
+    next =
+      Enum.reduce(patterns, maps, fn {left, right}, acc ->
+        case shape(right, acc) do
+          found when found == %{} ->
+            acc
+
+          found ->
+            Enum.reduce(vars(left), acc, &add_shape(&2, &1, bound(left, found)))
+        end
+      end)
+
+    if next == maps, do: maps, else: spread_maps(next, patterns)
+  end
+
+  defp add_shape(maps, var, found), do: Map.update(maps, var, found, &merge_shapes(&1, found))
+
+  # A pattern that takes a map apart binds what's inside, which the keys set on the outside don't touch.
+  defp bound({name, meta, context}, found)
+       when is_atom(name) and is_list(meta) and is_atom(context), do: found
+
+  defp bound(_pattern, found),
+    do: Map.new(found, fn {position, _keys} -> {position, MapSet.new()} end)
+
+  # The parameters whose map an expression is, with the keys set on it: a variable holding one, a map inside one, or
+  # one with keys put or merged in. A map the code builds itself, or takes chosen keys from, isn't one: its keys are
+  # the code's.
+  defp shape({name, meta, context}, maps)
+       when is_atom(name) and is_list(meta) and is_atom(context),
+       do: Map.get(maps, var(name, meta, context), %{})
+
+  defp shape({{:., _, [Access, :get]}, _, [inner, _key | _]}, maps), do: inside(inner, maps)
+
+  defp shape({{:., _, [Map, name]}, _, [inner | _]}, maps) when name in [:get, :fetch!],
+    do: inside(inner, maps)
+
+  defp shape({{:., _, [Map, name]}, _, [inner, key | _]}, maps) when name in [:put, :put_new],
+    do: set(shape(inner, maps), [key])
+
+  defp shape({{:., _, [Map, :drop]}, _, [inner, keys]}, maps) when is_list(keys),
+    do: set(shape(inner, maps), keys)
+
+  defp shape({{:., _, [Map, :delete]}, _, [inner, key]}, maps), do: set(shape(inner, maps), [key])
+
+  defp shape({{:., _, [Map, name]}, _, [inner | _]}, maps)
+       when name in [:drop, :update, :update!, :replace!],
+       do: shape(inner, maps)
+
+  # The compiler writes `Map.put/3`, `Map.merge/2` and `Map.delete/2` as `:maps` calls, the map last for `put` and
+  # `remove`. Keys the code deletes, as it sets, aren't the client's.
+  defp shape({{:., _, [:maps, :put]}, _, [key, _value, inner]}, maps),
+    do: set(shape(inner, maps), [key])
+
+  defp shape({{:., _, [:maps, :remove]}, _, [key, inner]}, maps),
+    do: set(shape(inner, maps), [key])
+
+  defp shape({{:., _, [module, :merge]}, _, [left, {:%{}, _, pairs}]}, maps)
+       when module in [Map, :maps],
+       do: set(shape(left, maps), Enum.map(pairs, &elem(&1, 0)))
+
+  defp shape({{:., _, [module, :merge]}, _, [left, right]}, maps) when module in [Map, :maps],
+    do: merge_shapes(shape(left, maps), shape(right, maps))
+
+  defp shape({{:., _, [inner, _key]}, meta, []}, maps) do
+    if Keyword.get(meta, :no_parens, false), do: inside(inner, maps), else: %{}
+  end
+
+  defp shape(_ast, _maps), do: %{}
+
+  defp inside(inner, maps), do: bound(nil, shape(inner, maps))
+
+  defp set(shapes, keys) do
+    names = for key <- keys, is_atom(key) or is_binary(key), do: to_string(key)
+    Map.new(shapes, fn {position, set} -> {position, MapSet.union(set, MapSet.new(names))} end)
+  end
+
+  # Two ways a variable can hold a parameter's map: only keys set on both are sure to be set.
+  defp merge_shapes(left, right),
+    do: Map.merge(left, right, fn _position, a, b -> MapSet.intersection(a, b) end)
+
+  defp callee({{:., _, [module, name]}, meta, args}, _module, _locals)
+       when is_atom(module) and is_atom(name) and is_list(args),
+       do: {{module, name, length(args)}, meta[:line], args}
+
+  defp callee({:super, meta, args}, module, _locals) when is_list(args) do
+    {_kind, name} = Keyword.fetch!(meta, :super)
+    {{module, name, length(args)}, meta[:line], args}
+  end
+
+  defp callee({name, meta, args}, module, locals) when is_atom(name) and is_list(args) do
+    if MapSet.member?(locals, {name, length(args)}),
+      do: {{module, name, length(args)}, meta[:line], args}
+  end
+
+  defp callee(_node, _module, _locals), do: nil
+
+  defp vars(ast) do
+    ast
+    |> Macro.prewalk([], fn
+      {name, meta, context} = node, acc
+      when is_atom(name) and is_list(meta) and is_atom(context) ->
+        if String.starts_with?(Atom.to_string(name), "_"),
+          do: {node, acc},
+          else: {node, [var(name, meta, context) | acc]}
+
+      node, acc ->
+        {node, acc}
+    end)
+    |> elem(1)
+  end
+
+  # A variable, by its name and the binding the compiler numbered, so `attrs` rebound to a map the code builds isn't
+  # the `attrs` it was given.
+  defp var(name, meta, context), do: {name, context, Keyword.get(meta, :version)}
 end

@@ -63,6 +63,32 @@ defmodule ArchTest.Code.Authorization do
   defp loads?(_name, _arity, _behaviours), do: false
 
   @doc false
+  # The positions of an endpoint's parameters that hold what the request sends: an action's, an event's or a
+  # message's params, a LiveView's URL params, and a channel's topic and payload.
+  @spec request_params(Code.key()) :: [non_neg_integer()]
+  def request_params({_module, name, 3}) when name in [:mount, :handle_params], do: [0]
+  def request_params({_module, :join, 3}), do: [0, 1]
+  def request_params(_endpoint), do: [1]
+
+  @doc false
+  # The calls a function makes in functions it gives to a helper that checks the user first, as `{target, line}`.
+  @spec guarded(Code.function_info(), Code.t()) :: MapSet.t()
+  def guarded(info, code) do
+    for {{guard, _line}, calls} <- info.actors.callbacks,
+        guards?(guard, MapSet.new(), code),
+        call <- calls,
+        into: MapSet.new(),
+        do: call
+  end
+
+  @doc false
+  # The calls a function makes on behalf of the user asking, as `{target, line}`, with those given a record a
+  # LiveView loaded for them when the function is the LiveView's.
+  @spec on_behalf(Code.key(), Code.function_info(), Code.t()) :: MapSet.t()
+  def on_behalf({module, _, _}, info, code),
+    do: MapSet.new(behalf(info, loads_for_user?(code, module), code))
+
+  @doc false
   # Whether a policy checks the endpoint: it, or its controller's plug pipeline, calls one, directly or through what
   # it calls, or every route to it goes through a pipeline or `live_session` hook that does.
   @spec checked?(Code.t(), routes(), Code.key(), [module()]) :: boolean()
@@ -180,7 +206,7 @@ defmodule ArchTest.Code.Authorization do
 
   defp unchecked([{key, origin} | rest], seen, {module, held?} = endpoint, code, find) do
     info = code.functions[key]
-    on_behalf = MapSet.new(on_behalf(info, held?, code))
+    on_behalf = MapSet.new(behalf(info, held?, code))
     requests = MapSet.new(info.actors.requests)
 
     {followed, outside} =
@@ -212,14 +238,9 @@ defmodule ArchTest.Code.Authorization do
   # The calls a function makes on behalf of the user asking: those given the user, those in a function it gives to one
   # that reads the user first, as a helper that checks the user's role and then runs the change does, and, in a
   # LiveView or LiveComponent that loads its records for the user, those given a record its assigns hold.
-  defp on_behalf(info, held?, code) do
-    guarded =
-      for {{guard, _line}, calls} <- info.actors.callbacks,
-          guards?(guard, MapSet.new(), code),
-          call <- calls,
-          do: call
-
-    info.actors.on_behalf ++ guarded ++ if(held?, do: info.actors.held, else: [])
+  defp behalf(info, held?, code) do
+    info.actors.on_behalf ++
+      MapSet.to_list(guarded(info, code)) ++ if(held?, do: info.actors.held, else: [])
   end
 
   # A helper that reads the user asking before it runs the function it's given, itself or through a helper it gives
