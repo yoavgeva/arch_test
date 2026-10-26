@@ -286,13 +286,37 @@ defmodule ArchTest.Data do
 
   defp locked?(around, locking), do: Enum.any?(around, &Map.has_key?(locking, &1))
 
-  # Whether the function's work runs in a transaction: one it opens, or one its caller opens around the call.
+  # Whether the function's work runs in a transaction: one it opens, or gives its work to a helper that opens, as
+  # `with_locked(query, fn row -> ... end)` does, or one its caller opens around the call the same ways.
   defp in_transaction?(key, around, code, effects) do
     Enum.any?(around, fn function ->
-      Enum.any?(code.functions[function].calls, fn call ->
-        (function == key or call.target == key) and opened_by_transaction?(call, code, effects)
-      end)
+      info = code.functions[function]
+
+      Enum.any?(
+        info.calls,
+        &((function == key or &1.target == key) and opened_by_transaction?(&1, code, effects))
+      ) or
+        Enum.any?(info.actors.callbacks, fn {{helper, _line}, calls} ->
+          (function == key or Enum.any?(calls, &(elem(&1, 0) == key))) and
+            transaction_helper?(helper, MapSet.new([function]), code, effects)
+        end)
     end)
+  end
+
+  # A function that opens a transaction, as `Repo.transaction(fn -> fun.(row) end)` does, and so runs the function it's
+  # given inside it, or gives its own to one that does.
+  defp transaction_helper?(key, seen, code, effects) do
+    case code.functions[key] do
+      nil ->
+        false
+
+      info ->
+        Enum.any?(info.calls, &opened_by_transaction?(&1, code, effects)) or
+          Enum.any?(info.actors.callbacks, fn {{helper, _line}, _calls} ->
+            not MapSet.member?(seen, helper) and
+              transaction_helper?(helper, MapSet.put(seen, key), code, effects)
+          end)
+    end
   end
 
   defp opened_by_transaction?(%{inside: %{target: opener}}, code, effects),

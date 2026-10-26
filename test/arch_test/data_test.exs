@@ -122,6 +122,15 @@ defmodule ArchTest.DataTest do
            |> Repo.update()
          end
 
+         def deposit(query, amount) do
+           with_account(query, fn account ->
+             account |> Ecto.Changeset.change(balance: account.balance + amount) |> Repo.update()
+           end)
+         end
+
+         defp with_account(query, fun), do: with_locked(query, fn account -> fun.(account) end)
+         defp with_locked(query, fun), do: Repo.transaction(fn -> fun.(lock_account(query)) end)
+
          def credit(changeset, amount),
            do: Ecto.Changeset.put_change(changeset, :balance, changeset.data.balance + amount)
 
@@ -295,7 +304,7 @@ defmodule ArchTest.DataTest do
                {DataFixture.Ads, {:spend, 2}, 26,
                 ~s(sets :balance from its old value: its lock: "FOR UPDATE" ends with the read, since no ) <>
                   "transaction holds it, so a request that changes it between the read and this write is lost"},
-               {DataFixture.Ads, {:credit, 2}, 37,
+               {DataFixture.Ads, {:credit, 2}, 46,
                 "sets :balance from its old value: a request that changes it between the read and this write " <>
                   "is lost"}
              ]
