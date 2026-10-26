@@ -97,7 +97,7 @@ defmodule ArchTest.Effects do
   }
   # Names of functions that change something rather than read it, such as `create_user/1` or `Req.post!/2`.
   @commands ~w(create insert update delete save put upsert remove send post patch publish broadcast notify enqueue
-               schedule write store persist destroy archive mark set add append push register subscribe)
+               schedule write store persist destroy archive mark set add append push register subscribe copy purge)
 
   @doc false
   defmacro __using__(_opts) do
@@ -444,7 +444,15 @@ defmodule ArchTest.Effects do
       command?(target) -> nil
       Reach.seed(target) in @queries -> {Reach.seed(target), []}
       Reach.seed(target) != nil -> nil
-      true -> Enum.find_value(@queries, &with_path(&1, effects[target]))
+      true -> Enum.find_value(@queries, &query_path(&1, effects[target]))
+    end
+  end
+
+  # An HTTP path that ends in a command, as `HTTPoison.post/3` is, writes rather than queries.
+  defp query_path(kind, effects) do
+    case with_path(kind, effects) do
+      {:http, [_ | _] = path} = found -> if command?(List.last(path).target), do: nil, else: found
+      found -> found
     end
   end
 

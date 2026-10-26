@@ -116,6 +116,19 @@ defmodule ArchTest.Code.Errors do
   end
 
   @doc false
+  # Whether a function runs a function it was given, as `fun.()` does: it may do anything.
+  @spec runs_funs?([tuple()]) :: boolean()
+  def runs_funs?(clauses) do
+    clauses
+    |> Enum.map(fn {_meta, _args, _guards, body} -> body end)
+    |> Macro.prewalk(false, fn
+      {{:., _, [_fun]}, _, args} = node, _found when is_list(args) -> {node, true}
+      node, found -> {node, found}
+    end)
+    |> elem(1)
+  end
+
+  @doc false
   # The functions that call through a module chosen at runtime, directly or through the project functions they call:
   # an adapter's caller may be reaching the database or the network, though the code can't say.
   @spec reaching_dynamic(Code.t()) :: MapSet.t(Code.key())

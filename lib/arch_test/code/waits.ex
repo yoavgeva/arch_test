@@ -53,13 +53,26 @@ defmodule ArchTest.Code.Waits do
   @doc false
   @spec unbounded([tuple()], module(), atom(), arity(), MapSet.t()) :: [wait()]
   def unbounded(clauses, module, name, arity, locals) do
-    clauses
-    |> Enum.map(fn {_meta, _args, _guards, body} -> body end)
+    bodies = Enum.map(clauses, fn {_meta, _args, _guards, body} -> body end)
+    flushes? = cancels_timer?(bodies)
+
+    bodies
     |> Macro.prewalk([], fn node, acc ->
       {node, waits(node, module, {name, arity}, locals) ++ acc}
     end)
     |> elem(1)
     |> Enum.reverse()
+    |> Enum.reject(&(&1.how == :receive and flushes?))
+  end
+
+  # A receive after a timer is cancelled flushes its message, which is already on its way when cancelling fails.
+  defp cancels_timer?(bodies) do
+    bodies
+    |> Macro.prewalk(false, fn
+      {{:., _, [:erlang, :cancel_timer]}, _, _} = node, _found -> {node, true}
+      node, found -> {node, found}
+    end)
+    |> elem(1)
   end
 
   defp waits({:receive, meta, [options]}, module, _self, locals) when is_list(options) do
@@ -130,7 +143,11 @@ defmodule ArchTest.Code.Waits do
   # Whether a receive also takes the `:DOWN` of a process it monitors, so it stops waiting when that process dies, as
   # `GenServer.call/2` does.
   defp watches?(clauses) when is_list(clauses),
-    do: Enum.any?(clauses, &match?({:->, _, [[{:{}, _, [:DOWN | _]}], _]}, &1))
+    do:
+      Enum.any?(
+        clauses,
+        &match?({:->, _, [[{:{}, _, [tag | _]}], _]} when tag in [:DOWN, :EXIT], &1)
+      )
 
   defp watches?(_clauses), do: false
 

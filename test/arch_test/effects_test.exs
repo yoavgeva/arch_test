@@ -94,6 +94,13 @@ defmodule ArchTest.EffectsTest do
          defp update_sql(table), do: "UPDATE \#{table} SET n = n + 1 WHERE id = $1"
 
          defp load(id), do: Repo.get!(:orders, id)
+
+         def ping_all(urls), do: Enum.each(urls, fn url -> ping(url) end)
+
+         def copy_all(ids), do: Enum.map(ids, fn id -> copy_order(id) end)
+
+         defp ping(url), do: HTTPoison.post(url, "", [])
+         defp copy_order(id), do: Repo.get!(:orders, id)
        end
        """},
       {@web,
