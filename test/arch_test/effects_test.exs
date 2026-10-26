@@ -79,6 +79,11 @@ defmodule ArchTest.EffectsTest do
 
          defp archive(_subject, id), do: Posts.update_post(id, %{archived: true})
 
+         def remove(conn, %{"id" => id}) do
+           Posts.update_post(id, %{removed: true})
+           if id == conn.assigns.current_user.id, do: Map.put(conn, :self, true), else: conn
+         end
+
          defp phoenix_controller_pipeline(conn, action), do: apply(__MODULE__, action, [conn, conn.params])
        end
        """},
@@ -699,12 +704,12 @@ defmodule ArchTest.EffectsTest do
       assert capture(&Effects.writes_are_authorized/2, "EffectsFixture.ReplicaController") == []
     end
 
-    test "an auth subject is the user asking, and a record compared with the user's is checked" do
+    test "an auth subject is the user asking, and a record compared with the user's before the write is checked" do
       assert Enum.map(
                capture(&Effects.writes_are_authorized/2, "EffectsFixture.CheckedController"),
                & &1.caller_function
              ) ==
-               [{:unpublish, 2}]
+               [{:unpublish, 2}, {:remove, 2}]
     end
   end
 

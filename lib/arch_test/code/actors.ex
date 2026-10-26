@@ -41,24 +41,26 @@ defmodule ArchTest.Code.Actors do
         bindings = bindings(body)
         actors = args |> pattern_actors() |> spread(bindings)
 
-        # A value compared with the user's, as a post whose owner is, has been checked against them.
-        compared = compared(body, actors)
-        actors = spread(MapSet.union(actors, compared), bindings)
+        # A value compared with the user's, as a post whose owner is, has been checked against them, from the line of
+        # the comparison on.
+        compared = body |> compared(actors) |> spread_lines(bindings)
         held = spread_held(MapSet.new(), bindings)
 
         reads =
-          if MapSet.size(actors) > 0 or carries?(body, actors), do: [{:reads, true}], else: []
+          if MapSet.size(actors) > 0 or carries?(body, actors) or compared != %{},
+            do: [{:reads, true}],
+            else: []
 
         # A read whose result is then compared with the user's, as `post = get_post!(id)` is, reads on their behalf.
         checked_reads =
           for {left, right} <- bindings,
-              Enum.any?(vars(left), &MapSet.member?(compared, &1)),
+              Enum.any?(vars(left), &Map.has_key?(compared, &1)),
               {target, line, _args} <- List.wrap(call(right, module, locals)),
               do: {:on_behalf, {target, line}}
 
         body
         |> Macro.prewalk(reads ++ checked_reads, fn node, acc ->
-          {node, classify(node, {actors, held}, module, locals) ++ acc}
+          {node, classify(node, {actors, held, compared}, module, locals) ++ acc}
         end)
         |> elem(1)
         |> Enum.reverse()
@@ -73,15 +75,15 @@ defmodule ArchTest.Code.Actors do
     }
   end
 
-  defp classify(node, {actors, held}, module, locals) do
+  defp classify(node, known, module, locals) do
     case call(node, module, locals) do
       nil -> []
-      {target, line, args} -> classify_call({target, line}, args, {actors, held}, module, locals)
+      {target, line, args} -> classify_call({target, line}, args, known, module, locals)
     end
   end
 
-  defp classify_call(call, args, {actors, held}, module, locals) do
-    on_behalf? = carries?(args, actors)
+  defp classify_call({_target, line} = call, args, {actors, held, compared}, module, locals) do
+    on_behalf? = carries?(args, actors) or checked_before?(args, compared, line)
 
     kinds =
       for {kind, true} <- [
@@ -306,9 +308,9 @@ defmodule ArchTest.Code.Actors do
   # carries the user, as `post` in `post.user_id == user.id` is.
   defp compared(body, actors) do
     body
-    |> Macro.prewalk(MapSet.new(), fn
-      {{:., _, [:erlang, op]}, _, [left, right]} = node, acc when op in @comparisons ->
-        {node, MapSet.union(acc, checked(left, right, actors))}
+    |> Macro.prewalk(%{}, fn
+      {{:., _, [:erlang, op]}, meta, [left, right]} = node, acc when op in @comparisons ->
+        {node, Enum.reduce(checked(left, right, actors), acc, &earliest(&2, &1, meta[:line]))}
 
       node, acc ->
         {node, acc}
@@ -318,9 +320,32 @@ defmodule ArchTest.Code.Actors do
 
   defp checked(left, right, actors) do
     cond do
-      carries?(right, actors) and not carries?(left, actors) -> MapSet.new(vars(left))
-      carries?(left, actors) and not carries?(right, actors) -> MapSet.new(vars(right))
-      true -> MapSet.new()
+      carries?(right, actors) and not carries?(left, actors) -> vars(left)
+      carries?(left, actors) and not carries?(right, actors) -> vars(right)
+      true -> []
     end
   end
+
+  defp earliest(compared, _var, nil), do: compared
+  defp earliest(compared, var, line), do: Map.update(compared, var, line, &min(&1, line))
+
+  # Every variable bound from a compared one is compared from the same line, until no more are found.
+  defp spread_lines(compared, bindings) do
+    next =
+      Enum.reduce(bindings, compared, fn {left, right}, acc ->
+        case right |> vars() |> Enum.flat_map(&List.wrap(Map.get(acc, &1))) do
+          [] -> acc
+          lines -> Enum.reduce(vars(left), acc, &earliest(&2, &1, Enum.min(lines)))
+        end
+      end)
+
+    if next == compared, do: compared, else: spread_lines(next, bindings)
+  end
+
+  # Whether a call's arguments hold a value the code compared with the user's before the call, as a write after
+  # `if post.user_id == user.id` does. One compared after it, as a redirect choosing its page is, checked nothing.
+  defp checked_before?(_args, _compared, nil), do: false
+
+  defp checked_before?(args, compared, line),
+    do: args |> vars() |> Enum.any?(&(Map.get(compared, &1, line + 1) <= line))
 end
