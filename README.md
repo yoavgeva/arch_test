@@ -22,9 +22,10 @@ Architecture and design rules as tests. Enforced from bytecode.
 | `define_onion` + `enforce_onion_rules` | Onion / hexagonal architecture |
 | `define_slices` + `enforce_isolation` | Modulith bounded-context isolation |
 | `ArchTest.Conventions` | Ban `IO.puts`, `dbg`, bare `raise`, and more |
-| `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1`, I/O in transactions, authorized writes |
+| `ArchTest.Effects` | N+1 queries through any call, pure functional cores, I/O in GenServer `init/1`, I/O in transactions, authorized writes and reads |
 | `ArchTest.Processes` | One interface per process, GenServers with a reason to exist, supervised processes, waits with limits |
 | `ArchTest.API` | No flag arguments, no swappable ids, choices as atoms, one return type per function |
+| `ArchTest.Data` | No mass assignment, no lost updates, no float money, no whole-table loads |
 | `ArchTest.TestCode` | Tests that use their subject, mock only I/O, don't sleep, and keep async tests isolated |
 | `ArchTest.Guardrails` | No silenced warnings, no stubs, nothing public only for tests, no swallowed errors |
 | `ArchTest.Recommended` | The design rules worth holding any project to, as one test |
@@ -54,6 +55,37 @@ Elixir has excellent tools for code quality. But there's a gap:
 **ArchTest** is a test library. Rules live in ExUnit tests. You write them in plain Elixir, run them with `mix test`, and get structured failure output listing every violation. You can express rules Boundary can't — transitive dependencies, glob-based module selection, coupling metrics, naming conventions, cycle detection across arbitrary module sets — without touching production code at all.
 
 For most teams, **ArchTest alone is enough**. You get bounded-context isolation, dependency direction, naming policies, convention checks, and metrics — all in ExUnit, with no changes to production code. If you later want compile-time enforcement on top of test-time enforcement, the two compose naturally: Boundary for hard build-time API guards, ArchTest for everything else.
+
+### Beside Credo plugins
+
+Credo plugins such as [ex_slop](https://github.com/elixir-vibe/ex_slop),
+[oeditus_credo](https://github.com/Oeditus/oeditus_credo),
+[Jump's credo_checks](https://github.com/Jump-App/credo_checks) and [smell](https://github.com/RicardoSantos-99/smell)
+catch AI-written code and anti-patterns. Credo reads one file's source at a time, so their checks match code as it's
+written: a `Repo.get` inside an `Enum.map`, a `rescue` that returns `nil`, an action with no authorization call.
+ArchTest's design rules read the compiled code and follow calls across modules, so they also find those problems
+when the code spreads them out: a query three calls down a context function, a write whose check lives in a router
+pipeline or an `on_mount` hook.
+
+Use both. The plugins check idioms ArchTest doesn't: pipelines, `Enum` misuse, docs, LiveView forms. ArchTest checks
+what no single file shows. Where they overlap, the ArchTest rule follows the code further:
+
+| ArchTest rule | Per-file check | What the ArchTest rule adds |
+|---|---|---|
+| `no_queries_in_loops` | ex_slop `QueryInEnumMap`, oeditus_credo `NPlusOneQuery` | `for`, every `Enum` and `Stream` loop, captures, and queries the loop reaches through other functions |
+| `writes_are_authorized`, `reads_are_authorized` | oeditus_credo `MissingAuthorization`, `InsecureDirectObjectReference` | Follows the user asking into the code that writes or reads; counts router pipelines, `on_mount` hooks, policies, and the LiveViews that render a component |
+| `no_swallowed_errors` | ex_slop `BlanketRescue`, oeditus_credo `SwallowingException`, smell `NonAssertivePatternMatching` | Flags errors from the database, network, files and other services, through any call; a parser's `{:error, _}` and a predicate's `false` pass |
+| `no_unbounded_queries` | ex_slop `RepoAllThenFilter`, oeditus_credo `InefficientFilter` | Any endpoint that loads a whole table, filtered afterwards or not |
+| `processes_are_supervised` | oeditus_credo `UnmanagedTask` | `spawn`, `Task.start`, `GenServer.start` and `Agent.start`; `Task.async` with `Task.await` passes |
+| `tests_use_their_subject` | Jump `VacuousTest` | `FooTest` must reach `Foo`, directly or through helpers, requests, protocols and supervisors |
+| `async_tests_share_no_state` | Jump `AvoidLoggerConfigureInTest` | `Application.put_env`, `System.put_env` and `:persistent_term` too, in async tests |
+| `no_functions_only_tests_call` | ex_slop `DocFalseOnPublicFunction` | Flags a `@doc false` function only when tests alone call it |
+
+These rules have no counterpart in those plugins: `no_lost_updates`, `no_mass_assignment`, `no_float_money`,
+`no_io_in_transactions`, `no_work_in_init`, `no_unbounded_waits`, `processes_have_one_interface`,
+`tests_dont_mock_pure_modules`, `tests_dont_sleep`, `no_suppressions`, and the `ArchTest.API` rules. For security,
+run [Sobelow](https://github.com/sobelow/sobelow) as well: it checks for injection, XSS and insecure configuration,
+which ArchTest doesn't.
 
 ---
 
