@@ -47,13 +47,16 @@ end
 
 `tests_use_their_subject/2` counts as a use:
 
-- the module's name anywhere in the test, other than as the module a mock replaces;
-- a call to one of its functions the test doesn't mock;
+- the module's name anywhere in the test, `use` options included, other than as the module a mock replaces;
+- a call to one of its functions the test doesn't mock, or to one of its macros, as a sigil is;
 - a use of a module nested in it, as `MyApp.Billing.Invoice` is in `MyApp.Billing`;
 - code the test calls, or a test helper it calls, that reaches the module: calls it, or names it, as a registry
   listing rule modules does, directly or through the functions it calls;
+- a call to a protocol implemented for the module, or implemented in its file, as a mailer's
+  `defimpl Swoosh.Email.Recipient` is;
+- the `init/1` of a process the test starts with `start_supervised!/1`, and the children it names;
 - for controllers, live views and channels, requests through `Phoenix.ConnTest` (`get/2`, `post/3`...),
-  `Phoenix.LiveViewTest` (`live/2`) and `Phoenix.ChannelTest` (`subscribe_and_join/3`).
+  `Phoenix.LiveViewTest` (`live/2`), `Phoenix.ChannelTest` (`subscribe_and_join/3`) and PhoenixTest (`visit/2`).
 
 Tests named after no module in scope are skipped.
 

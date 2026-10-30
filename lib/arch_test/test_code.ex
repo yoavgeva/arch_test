@@ -80,11 +80,14 @@ defmodule ArchTest.TestCode do
   Asserts that each test module exercises the module it's named after: `MyApp.AccountsTest` uses
   `MyApp.Accounts`, and not only through mocks of it.
 
-  A use is the module's name anywhere in the test, other than as the module a mock replaces, a call to one of
-  its functions the test doesn't mock, a use of a module nested in it, as `MyApp.Billing.Invoice` is in
-  `MyApp.Billing`, or code the test calls that reaches it: calls it, or names it, as a registry of rule modules
-  does, directly or through the functions it calls. A test of a controller, live view or channel that sends requests through `Phoenix.ConnTest`,
-  `Phoenix.LiveViewTest` or `Phoenix.ChannelTest` uses it too. Tests named after no module in scope are skipped.
+  A use is the module's name anywhere in the test, `use` options included, other than as the module a mock
+  replaces; a call to one of its functions the test doesn't mock, or to one of its macros, as a sigil is; a use of
+  a module nested in it, as `MyApp.Billing.Invoice` is in `MyApp.Billing`; code the test calls that reaches it:
+  calls it, or names it, as a registry of rule modules does, directly or through the functions it calls; a call to
+  a protocol implemented for it, or implemented in its file; or the `init/1` of a process the test starts with
+  `start_supervised!/1`, and the children it names. A test of a controller, live view or channel that sends
+  requests through `Phoenix.ConnTest`, `Phoenix.LiveViewTest`, `Phoenix.ChannelTest` or PhoenixTest uses it too.
+  Tests named after no module in scope are skipped.
   """
   @spec tests_use_their_subject(ModuleSet.t(), keyword()) :: :ok
   def tests_use_their_subject(%ModuleSet{} = subject, opts \\ []) do
