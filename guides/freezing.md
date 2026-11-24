@@ -70,6 +70,9 @@ On all subsequent runs, the freeze mechanism:
 3. Computes `current − baseline`
 4. Fails only if there are new violations not in the baseline
 
+A baseline names each violation by its module, function, file and message, not its line, so editing code above a
+frozen violation doesn't make it new. It counts them: a second violation like a frozen one in the same file is new.
+
 The 47 existing violations are silently ignored. Any *new* violation — introduced in a PR — causes a failure.
 
 ---

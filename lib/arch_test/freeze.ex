@@ -167,13 +167,16 @@ defmodule ArchTest.Freeze do
       {:ok, content} ->
         content
         |> String.split("\n", trim: true)
-        |> Enum.map(&String.trim/1)
+        |> Enum.map(&(&1 |> String.trim() |> without_line()))
         |> Enum.sort()
 
       {:error, :enoent} ->
         []
     end
   end
+
+  # Baselines written before keys left out the line name a location as file:line.
+  defp without_line(key), do: Regex.replace(~r/(\tlocation=[^\t]*?):\d+(?=\t|$)/, key, "\\1")
 
   defp write_baseline(path, violations) do
     File.mkdir_p!(Path.dirname(path))

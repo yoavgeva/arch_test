@@ -154,6 +154,13 @@ defmodule ArchTest.ViolationTest do
     test "keeps the same freeze key whatever its rule and fix say", %{violation: violation} do
       assert Violation.key(violation) == Violation.key(%{violation | rule: nil, fix: "reworded"})
     end
+
+    test "keeps the same freeze key when its line moves, and names its file", %{
+      violation: violation
+    } do
+      assert Violation.key(violation) == Violation.key(%{violation | line: 42})
+      assert Violation.key(violation) =~ "location=lib/my_app/orders.ex\t"
+    end
   end
 
   describe "format_all/1" do
