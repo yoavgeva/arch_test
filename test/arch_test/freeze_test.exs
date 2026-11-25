@@ -184,4 +184,60 @@ defmodule ArchTest.FreezeTest do
       end
     end
   end
+
+  describe "freeze/2 — frozen violations stay known when code moves" do
+    defp report_at(lines) do
+      fn ->
+        lines
+        |> Enum.map(fn line ->
+          %ArchTest.Violation{
+            type: :custom,
+            module: MyApp.Orders,
+            caller: MyApp.Orders,
+            caller_function: {:with_users, 1},
+            file: "lib/my_app/orders.ex",
+            line: line,
+            message: "queries the database once per item"
+          }
+        end)
+        |> ArchTest.Assertions.assert_no_violations_public("no_queries_in_loops")
+      end
+    end
+
+    defp baseline(rule_id, lines) do
+      System.put_env("ARCH_TEST_UPDATE_FREEZE", "true")
+      Freeze.freeze(rule_id, report_at(lines))
+    after
+      System.delete_env("ARCH_TEST_UPDATE_FREEZE")
+    end
+
+    test "a violation whose line moved is still the frozen one" do
+      rule_id = "moved_#{System.unique_integer([:positive])}"
+      baseline(rule_id, [5])
+
+      assert Freeze.freeze(rule_id, report_at([9])) == :ok
+    end
+
+    test "each one counts: another like it in the same file is new" do
+      rule_id = "counted_#{System.unique_integer([:positive])}"
+      baseline(rule_id, [5])
+
+      assert_raise ExUnit.AssertionError, ~r/1 NEW violation/, fn ->
+        Freeze.freeze(rule_id, report_at([5, 20]))
+      end
+    end
+
+    test "reads baselines written with line numbers" do
+      rule_id = "old_baseline_#{System.unique_integer([:positive])}"
+
+      File.write!(
+        Path.join(@tmp_dir, "#{rule_id}.txt"),
+        "type=custom\tcaller=MyApp.Orders\tcallee=\tmodule=MyApp.Orders\tpath=\t" <>
+          "caller_function=with_users/1\tcallee_function=\tlocation=lib/my_app/orders.ex:5\t" <>
+          "message=queries the database once per item"
+      )
+
+      assert Freeze.freeze(rule_id, report_at([12])) == :ok
+    end
+  end
 end

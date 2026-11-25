@@ -79,7 +79,9 @@ defmodule ArchTest.Violation do
   The key is intentionally line-oriented and text-friendly, but it is derived
   from the violation struct rather than parsed from rendered assertion output.
   A violation's `rule` and `fix` aren't part of it, so rewording a fix keeps
-  baselines valid.
+  baselines valid. Nor is its line, only its file: code added above a frozen
+  violation moves it without making it new. A baseline counts its keys, so a
+  second violation like a frozen one in the same file is still new.
   """
   @spec key(t()) :: String.t()
   def key(%__MODULE__{} = v) do
@@ -91,7 +93,7 @@ defmodule ArchTest.Violation do
       {"path", format_path(v.path)},
       {"caller_function", format_function(v.caller_function)},
       {"callee_function", format_function(v.callee_function)},
-      {"location", format_location(v.file, v.line)},
+      {"location", v.file},
       {"message", normalize_message(v.message)}
     ]
     |> Enum.map_join("\t", fn {key, value} -> "#{key}=#{format_value(value)}" end)

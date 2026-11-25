@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Freeze baselines name a violation's file, not its line: code added or removed
+  above a frozen violation no longer makes it new. Baselines still count, so a
+  second violation like a frozen one in the same file fails. Baselines written
+  with lines are read as they are; refreshing one rewrites it without them.
+
 ## [0.4.0] - 2026-10-27
 
 ### Added
